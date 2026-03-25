@@ -57,3 +57,47 @@ export interface UserProgress {
   weeklyXp: number[];
   subjectPerformance: SubjectPerformance[];
 }
+
+// ---- New types for persistence ----
+
+export type UserRole = "user" | "admin";
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  role: UserRole;
+  isApproved: boolean;
+  createdAt: string;
+}
+
+export interface UserAnswer {
+  id: string;
+  userId: string;
+  questionId: string;
+  selectedOption: string;
+  isCorrect: boolean;
+  answeredAt: string;
+}
+
+export interface FlashcardReview {
+  id: string;
+  userId: string;
+  flashcardId: string;
+  rating: "wrong" | "almost" | "correct";
+  reviewedAt: string;
+}
+
+export interface UserStats {
+  userId: string;
+  totalAnswered: number;
+  totalCorrect: number;
+  streak: number;
+  lastActivityDate: string;
+  xp: number;
+  level: number;
+  rank: string;
+  dailyGoal: DailyGoal;
+  weeklyXp: number[];
+}

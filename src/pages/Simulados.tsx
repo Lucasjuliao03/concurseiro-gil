@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/AppLayout";
-import { ClipboardList, Clock, Play, ChevronRight } from "lucide-react";
+import { ClipboardList, Clock, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { subjects } from "@/data/mockData";
+import { subjects } from "@/data/questionsDb";
+import { useAuth } from "@/contexts/AuthContext";
+import { canAnswer, getAnsweredCount } from "@/services/accessService";
+import { BlockedOverlay } from "@/components/BlockedOverlay";
 
 interface SimuladoConfig {
   questionCount: number;
@@ -11,11 +14,23 @@ interface SimuladoConfig {
 }
 
 export default function SimuladosPage() {
+  const { user, isApproved } = useAuth();
+  const hasAccess = canAnswer();
+  const answeredCount = user ? getAnsweredCount(user.id) : 0;
+
   const [config, setConfig] = useState<SimuladoConfig>({
     questionCount: 20,
     timeMinutes: 60,
     selectedSubjects: [],
   });
+
+  if (!hasAccess && !isApproved) {
+    return (
+      <AppLayout>
+        <BlockedOverlay answeredCount={answeredCount} />
+      </AppLayout>
+    );
+  }
 
   const questionOptions = [10, 20, 30, 50];
   const timeOptions = [30, 60, 90, 120];
@@ -41,7 +56,6 @@ export default function SimuladosPage() {
           Configure sua prova simulada e teste seus conhecimentos em condições reais.
         </p>
 
-        {/* Question count */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">Número de questões</label>
           <div className="grid grid-cols-4 gap-2">
@@ -62,7 +76,6 @@ export default function SimuladosPage() {
           </div>
         </div>
 
-        {/* Time */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground flex items-center gap-1.5">
             <Clock className="h-4 w-4 text-muted-foreground" /> Tempo (minutos)
@@ -85,7 +98,6 @@ export default function SimuladosPage() {
           </div>
         </div>
 
-        {/* Subjects */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">Matérias</label>
           <div className="grid grid-cols-2 gap-2">
@@ -115,12 +127,10 @@ export default function SimuladosPage() {
           </p>
         </div>
 
-        {/* Start button */}
         <button className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-4 font-bold text-primary-foreground active:scale-[0.98] transition-all animate-pulse-glow">
           <Play className="h-5 w-5" /> Iniciar Simulado
         </button>
 
-        {/* Info */}
         <div className="rounded-2xl bg-card border border-border p-4 text-sm text-muted-foreground space-y-1.5">
           <p className="font-medium text-foreground text-xs uppercase tracking-wider">Sobre o simulado</p>
           <p>• Cronômetro regressivo durante a prova</p>
