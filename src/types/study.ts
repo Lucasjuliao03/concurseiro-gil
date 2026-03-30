@@ -14,6 +14,7 @@ export interface QuestionOption {
 export interface Question {
   id: string;
   subjectId: string;
+  topicId: string | null;
   topic: string;
   subtopic: string;
   difficulty: "fácil" | "média" | "difícil";
@@ -29,6 +30,7 @@ export interface Question {
 export interface Flashcard {
   id: string;
   subjectId: string;
+  topicId: string | null;
   topic: string;
   front: string;
   back: string;
@@ -60,7 +62,7 @@ export interface UserProgress {
 
 // ---- New types for persistence ----
 
-export type UserRole = "user" | "admin";
+export type UserRole = "student" | "admin";
 
 export interface User {
   id: string;

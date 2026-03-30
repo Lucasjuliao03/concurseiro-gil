@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { BookOpen, Lock, Mail, User, Eye, EyeOff, ChevronRight } from "lucide-react";
@@ -11,20 +11,29 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { login, register } = useAuth();
+  const { login, register, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
+
+  // If already logged in, redirect away
+  useEffect(() => {
+    if (isAuthenticated && !loading) {
+      navigate("/", { replace: true });
+    }
+  }, [isAuthenticated, loading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    
     setError("");
-    setLoading(true);
+    setIsSubmitting(true);
 
     try {
       let result;
       if (isRegister) {
-        if (!name.trim()) { setError("Informe seu nome."); setLoading(false); return; }
+        if (!name.trim()) { setError("Informe seu nome."); setIsSubmitting(false); return; }
         result = await register(name.trim(), email.trim(), password);
       } else {
         result = await login(email.trim(), password);
@@ -38,7 +47,7 @@ export default function LoginPage() {
     } catch {
       setError("Erro inesperado. Tente novamente.");
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -47,11 +56,11 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-8 animate-slide-up">
         {/* Logo */}
         <div className="text-center space-y-3">
-          <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-2xl bg-primary/15 border border-primary/25">
-            <BookOpen className="h-8 w-8 text-primary" />
+          <div className="mx-auto flex items-center justify-center p-2 h-24 w-24 rounded-2xl bg-secondary/15 border border-secondary/25">
+            <img src="/logo.png" alt="SAFO Logo" className="w-[110%] h-[110%] object-contain scale-[1.3]" />
           </div>
           <div>
-            <h1 className="text-2xl font-black text-foreground">Concurseiro Gil</h1>
+            <h1 className="text-3xl font-black text-foreground">SAFO</h1>
             <p className="text-sm text-muted-foreground mt-1">Sua preparação para concursos</p>
           </div>
         </div>
@@ -141,15 +150,15 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={isSubmitting}
             className={cn(
               "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 font-semibold text-sm transition-all",
-              loading
+              isSubmitting
                 ? "bg-muted text-muted-foreground cursor-not-allowed"
                 : "bg-primary text-primary-foreground active:scale-[0.98]"
             )}
           >
-            {loading ? (
+            {isSubmitting ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground" />
             ) : (
               <>

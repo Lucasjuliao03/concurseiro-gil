@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { getAllUsers, approveUser, blockUser } from "@/services/authService";
-import { getAnsweredCount } from "@/services/accessService";
-import { getStats } from "@/services/statsService";
 import { User } from "@/types/study";
 import { Shield, Check, X, Users, ChevronRight, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -12,19 +10,25 @@ export default function AdminPage() {
   const { user: admin } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const allUsers = getAllUsers().filter((u) => u.role !== "admin");
-    setUsers(allUsers);
+    async function fetchUsers() {
+      setLoading(true);
+      const allUsers = await getAllUsers();
+      setUsers(allUsers.filter((u) => u.role !== "admin"));
+      setLoading(false);
+    }
+    fetchUsers();
   }, [refreshKey]);
 
-  const handleApprove = (userId: string) => {
-    approveUser(userId);
+  const handleApprove = async (userId: string) => {
+    await approveUser(userId);
     setRefreshKey((k) => k + 1);
   };
 
-  const handleBlock = (userId: string) => {
-    blockUser(userId);
+  const handleBlock = async (userId: string) => {
+    await blockUser(userId);
     setRefreshKey((k) => k + 1);
   };
 
@@ -40,7 +44,7 @@ export default function AdminPage() {
             onClick={() => setRefreshKey((k) => k + 1)}
             className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground"
           >
-            <RefreshCw className="h-3.5 w-3.5" /> Atualizar
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Atualizar
           </button>
         </div>
 
@@ -57,18 +61,16 @@ export default function AdminPage() {
 
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-foreground">Usuários Cadastrados</h2>
-          {users.length === 0 ? (
+          {loading ? (
+             <div className="rounded-2xl bg-card border border-border p-6 text-center">
+               <p className="text-sm text-muted-foreground">Carregando usuários...</p>
+             </div>
+          ) : users.length === 0 ? (
             <div className="rounded-2xl bg-card border border-border p-6 text-center">
               <p className="text-sm text-muted-foreground">Nenhum usuário cadastrado ainda.</p>
             </div>
           ) : (
             users.map((u) => {
-              const answered = getAnsweredCount(u.id);
-              const stats = getStats(u.id);
-              const accuracy = stats.totalAnswered > 0
-                ? Math.round((stats.totalCorrect / stats.totalAnswered) * 100)
-                : 0;
-
               return (
                 <div key={u.id} className="rounded-2xl bg-card border border-border p-4 space-y-3">
                   <div className="flex items-start justify-between">
@@ -87,21 +89,6 @@ export default function AdminPage() {
                     )}>
                       {u.isApproved ? "Aprovado" : "Pendente"}
                     </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded-lg bg-muted/50 py-1.5">
-                      <p className="text-xs font-bold text-foreground">{answered}</p>
-                      <p className="text-[10px] text-muted-foreground">Respondidas</p>
-                    </div>
-                    <div className="rounded-lg bg-muted/50 py-1.5">
-                      <p className="text-xs font-bold text-foreground">{accuracy}%</p>
-                      <p className="text-[10px] text-muted-foreground">Acertos</p>
-                    </div>
-                    <div className="rounded-lg bg-muted/50 py-1.5">
-                      <p className="text-xs font-bold text-foreground">{stats.xp}</p>
-                      <p className="text-[10px] text-muted-foreground">XP</p>
-                    </div>
                   </div>
 
                   <div className="flex gap-2">

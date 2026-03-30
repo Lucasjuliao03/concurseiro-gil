@@ -1,12 +1,12 @@
 import { useLocation, Link } from "react-router-dom";
-import { Home, BookOpen, Layers, ClipboardList, User } from "lucide-react";
+import { Home, BookOpen, Layers, FileText, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { path: "/", label: "Início", icon: Home },
   { path: "/questoes", label: "Questões", icon: BookOpen },
   { path: "/flashcards", label: "Cards", icon: Layers },
-  { path: "/simulados", label: "Simulado", icon: ClipboardList },
+  { path: "/resumos", label: "Resumos", icon: FileText },
   { path: "/perfil", label: "Perfil", icon: User },
 ];
 

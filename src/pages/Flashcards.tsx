@@ -1,43 +1,41 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/AppLayout";
-import { flashcards } from "@/data/flashcardsDb";
-import { subjects } from "@/data/questionsDb";
 import { Layers, RotateCcw, X, Check, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { canAnswer, getAnsweredCount } from "@/services/accessService";
-import { recordFlashcardReview } from "@/services/statsService";
+import { canAnswer } from "@/services/accessService";
+import { Flashcard } from "@/types/study";
+import { useSubjects, useFlashcards, useRecordFlashcardReview, useUserProductivity, useTopics, useUserFlashcardReviews } from "@/hooks/useStudyData";
+import { useMemo } from "react";
 import { BlockedOverlay } from "@/components/BlockedOverlay";
 
 function FlashcardViewer({ card, onRate }: {
-  card: typeof flashcards[0];
-  onRate: (rating: "wrong" | "almost" | "correct") => void;
+  card: Flashcard;
+  onRate: (rating: "wrong" | "hard" | "good" | "easy") => void;
 }) {
   const [flipped, setFlipped] = useState(false);
+  const { data: subjects = [] } = useSubjects();
   const subject = subjects.find((s) => s.id === card.subjectId);
 
   return (
     <div className="space-y-4 animate-slide-up">
       <div className="flex items-center gap-2">
         <Badge variant="outline" className="text-xs border-primary/30 text-primary">
-          {subject?.icon} {subject?.name}
+          {subject?.icon ?? "📖"} {subject?.name ?? "Geral"}
         </Badge>
         <Badge variant="outline" className="text-xs border-border text-muted-foreground">
           {card.topic}
         </Badge>
       </div>
 
-      <button
-        onClick={() => setFlipped(!flipped)}
-        className="w-full min-h-[280px] rounded-2xl border border-border bg-card p-6 text-left transition-all active:scale-[0.98] relative overflow-hidden"
-      >
+      <button onClick={() => setFlipped(!flipped)}
+        className="w-full min-h-[280px] rounded-2xl border border-border bg-card p-6 text-left transition-all active:scale-[0.98] relative overflow-hidden">
         <div className="absolute top-3 right-3">
           <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
             {flipped ? "VERSO" : "FRENTE"} · toque para virar
           </span>
         </div>
-
         {!flipped ? (
           <div className="flex items-center justify-center h-full pt-4">
             <p className="text-base font-medium text-foreground leading-relaxed text-center">{card.front}</p>
@@ -52,26 +50,28 @@ function FlashcardViewer({ card, onRate }: {
       {flipped ? (
         <div className="space-y-2 animate-slide-up">
           <p className="text-xs text-center text-muted-foreground">Como foi?</p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <button onClick={() => onRate("wrong")} className="flex flex-col items-center gap-1.5 rounded-xl bg-destructive/10 border border-destructive/20 py-3 active:scale-[0.95] transition-all">
               <X className="h-5 w-5 text-destructive" />
               <span className="text-xs font-medium text-destructive">Errei</span>
             </button>
-            <button onClick={() => onRate("almost")} className="flex flex-col items-center gap-1.5 rounded-xl bg-warning/10 border border-warning/20 py-3 active:scale-[0.95] transition-all">
+            <button onClick={() => onRate("hard")} className="flex flex-col items-center gap-1.5 rounded-xl bg-warning/10 border border-warning/20 py-3 active:scale-[0.95] transition-all">
               <HelpCircle className="h-5 w-5 text-warning" />
-              <span className="text-xs font-medium text-warning">Quase</span>
+              <span className="text-xs font-medium text-warning">Difícil</span>
             </button>
-            <button onClick={() => onRate("correct")} className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 border border-success/20 py-3 active:scale-[0.95] transition-all">
+            <button onClick={() => onRate("good")} className="flex flex-col items-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 py-3 active:scale-[0.95] transition-all">
+              <Check className="h-5 w-5 text-primary" />
+              <span className="text-xs font-medium text-primary">Bom</span>
+            </button>
+            <button onClick={() => onRate("easy")} className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 border border-success/20 py-3 active:scale-[0.95] transition-all">
               <Check className="h-5 w-5 text-success" />
-              <span className="text-xs font-medium text-success">Acertei</span>
+              <span className="text-xs font-medium text-success">Fácil</span>
             </button>
           </div>
         </div>
       ) : (
-        <button
-          onClick={() => setFlipped(true)}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-semibold text-sm text-primary-foreground active:scale-[0.98] transition-all"
-        >
+        <button onClick={() => setFlipped(true)}
+          className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-semibold text-sm text-primary-foreground active:scale-[0.98] transition-all">
           <RotateCcw className="h-4 w-4" /> Revelar Resposta
         </button>
       )}
@@ -81,47 +81,215 @@ function FlashcardViewer({ card, onRate }: {
 
 export default function FlashcardsPage() {
   const { user, isApproved } = useAuth();
+  const { data: subjects = [], isLoading: loadingSub } = useSubjects();
+  const { data: topics = [], isLoading: loadingTop } = useTopics();
+  const { data: flashcards = [], isLoading: loadingF } = useFlashcards();
+  const { data: userReviews = [], isLoading: loadingStats } = useUserFlashcardReviews(user?.id);
+  const { data: todayProd } = useUserProductivity(user?.id);
+  
+  const recordReview = useRecordFlashcardReview();
+
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const hasAccess = canAnswer();
-  const answeredCount = user ? getAnsweredCount(user.id) : 0;
+  const [sessionQueue, setSessionQueue] = useState<typeof flashcards>([]);
+  const [isFinished, setIsFinished] = useState(false);
+
+  // Consider all active subjects that have flashcards
+  const filteredSubjects = subjects.filter(sub => flashcards.some(f => f.subjectId === sub.id));
+  const filteredTopics = topics.filter(t => String(t.subject_id) === selectedSubjectId);
+
+  // Triggered when a topic is chosen: build the queue ONCE so it doesn't shuffle mid-session
+  const startSession = (topicId: string) => {
+    setSelectedTopicId(topicId);
+    setCurrentIndex(0);
+    setIsFinished(false);
+
+    const topicCards = flashcards.filter(f => 
+      topicId === "general" ? f.subjectId === selectedSubjectId : 
+      f.topicId === topicId || f.subjectId === selectedSubjectId && !f.topicId
+    );
+
+    const sorted = [...topicCards].sort((a, b) => {
+      const statA = userReviews.find(s => String(s.flashcard_id) === a.id);
+      const statB = userReviews.find(s => String(s.flashcard_id) === b.id);
+
+      const getPriority = (stat: any) => {
+        if (!stat) return 1; 
+        if (stat.last_review_result === 'wrong') return 2; 
+        return 3; 
+      };
+
+      const pA = getPriority(statA);
+      const pB = getPriority(statB);
+
+      if (pA !== pB) return pA - pB;
+
+      if (statA && statB) {
+        const timeA = new Date(statA.last_reviewed_at || 0).getTime();
+        const timeB = new Date(statB.last_reviewed_at || 0).getTime();
+        return timeA - timeB; 
+      }
+      return 0;
+    });
+
+    setSessionQueue(sorted);
+  };
+
+  const hasAccess = canAnswer(user);
+  const answeredCount = todayProd?.questions_answered ?? 0;
 
   if (!hasAccess && !isApproved) {
+    return <AppLayout><BlockedOverlay answeredCount={answeredCount} /></AppLayout>;
+  }
+
+  if (loadingF || loadingSub || loadingTop || loadingStats) {
+    return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando flashcards...</div></AppLayout>;
+  }
+
+  // --- SELECTION SCREENS ---
+
+  if (!selectedSubjectId) {
     return (
       <AppLayout>
-        <BlockedOverlay answeredCount={answeredCount} />
+        <div className="px-4 pt-6 space-y-6 animate-fade-in pb-20">
+          <div>
+            <h1 className="text-xl font-bold text-foreground flex items-center gap-2 mb-2"><Layers className="h-5 w-5 text-accent" /> Matéria (Flashcards)</h1>
+            <p className="text-sm text-muted-foreground">Selecione a matéria para revisar seus flashcards.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {filteredSubjects.map(sub => (
+              <button key={sub.id} onClick={() => setSelectedSubjectId(sub.id)}
+                className="p-4 rounded-2xl bg-card border border-border text-left hover:border-primary/50 transition-all active:scale-[0.98]">
+                <div className="text-2xl mb-2">{sub.icon}</div>
+                <h3 className="font-semibold text-sm text-foreground line-clamp-2">{sub.name}</h3>
+              </button>
+            ))}
+            {filteredSubjects.length === 0 && (
+              <p className="col-span-2 text-center text-muted-foreground py-8">Nenhum flashcard cadastrado ainda.</p>
+            )}
+          </div>
+        </div>
       </AppLayout>
     );
   }
 
-  const handleRate = (_rating: "wrong" | "almost" | "correct") => {
-    if (user) {
-      recordFlashcardReview(user.id);
+  if (!selectedTopicId) {
+    return (
+      <AppLayout>
+        <div className="px-4 pt-6 space-y-6 animate-fade-in pb-20">
+          <div>
+            <button onClick={() => setSelectedSubjectId(null)} className="text-primary text-sm font-medium mb-3 hover:underline">
+              &larr; Matérias
+            </button>
+            <h1 className="text-xl font-bold text-foreground">Escolha o Tema</h1>
+            <p className="text-sm text-muted-foreground">Filtre os flashcards pelo tema específico.</p>
+          </div>
+          <div className="space-y-3">
+            {filteredTopics.map(topic => {
+              const count = flashcards.filter(f => f.topicId === String(topic.id) || f.subjectId === selectedSubjectId && !f.topicId).length;
+              return (
+                <button key={topic.id} onClick={() => startSession(String(topic.id))} disabled={count === 0}
+                  className="w-full p-4 rounded-xl bg-card border border-border text-left flex justify-between items-center hover:border-primary/50 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
+                  <span className="font-medium text-sm text-foreground">{topic.name}</span>
+                  <Badge variant="secondary">{count} cards</Badge>
+                </button>
+              );
+            })}
+            <button onClick={() => startSession("general")}
+                className="w-full p-4 rounded-xl bg-card border border-border text-left flex justify-between items-center hover:border-primary/50 transition-all active:scale-[0.98]">
+              <span className="font-medium text-sm text-foreground">Todos os tópicos / Geral</span>
+              <Badge variant="secondary">{flashcards.filter(f => f.subjectId === selectedSubjectId).length} cards</Badge>
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // --- PLAYER SCREEN ---
+
+  if (sessionQueue.length === 0) {
+    return (
+      <AppLayout>
+        <div className="p-8 text-center space-y-4">
+          <p className="text-muted-foreground">Nenhum flashcard encontrado para este tema.</p>
+          <button onClick={() => setSelectedTopicId(null)} className="text-primary text-sm font-medium hover:underline">
+            &larr; Voltar
+          </button>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (isFinished) {
+    return (
+      <AppLayout>
+        <div className="px-4 pt-12 pb-20 space-y-6 text-center animate-fade-in flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="w-20 h-20 bg-success/10 rounded-full flex items-center justify-center mb-2">
+            <Check className="h-10 w-10 text-success" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground mb-2">Tema Concluído!</h2>
+            <p className="text-muted-foreground text-sm max-w-xs mx-auto">
+              Você revisou todos os flashcards deste tema. Ótimo trabalho!
+            </p>
+          </div>
+          
+          <div className="space-y-3 w-full max-w-sm mt-8">
+            <button onClick={() => setSelectedTopicId(null)}
+              className="w-full bg-primary text-primary-foreground font-semibold rounded-xl py-3.5 transition-all active:scale-[0.98]">
+              Escolher Outro Tema
+            </button>
+            <button onClick={() => startSession(selectedTopicId)}
+              className="w-full bg-secondary text-secondary-foreground font-semibold rounded-xl py-3.5 transition-all active:scale-[0.98]">
+              Revisar Novamente
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const handleRate = (rating: "wrong" | "hard" | "good" | "easy") => {
+    if (user && sessionQueue[currentIndex]) {
+      recordReview.mutate({
+        userId: user.id,
+        flashcardId: parseInt(sessionQueue[currentIndex].id),
+        result: rating,
+      });
     }
-    setCurrentIndex((prev) => (prev + 1) % flashcards.length);
+
+    if (currentIndex + 1 >= sessionQueue.length) {
+      setIsFinished(true);
+    } else {
+      setCurrentIndex((prev) => prev + 1);
+    }
   };
+
+  const currentFlashcard = sessionQueue[currentIndex];
 
   return (
     <AppLayout>
-      <div className="px-4 pt-6 space-y-4">
+      <div className="px-4 pt-6 space-y-4 pb-20">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Layers className="h-5 w-5 text-accent" />
-            <h1 className="text-xl font-bold text-foreground">Flashcards</h1>
-          </div>
-          <span className="text-xs text-muted-foreground">
-            {currentIndex + 1} / {flashcards.length}
-          </span>
+          <button onClick={() => setSelectedTopicId(null)} className="text-primary pr-4 text-sm font-medium hover:underline truncate max-w-[200px]">
+             &larr; Voltar
+          </button>
+          <button onClick={() => { setSelectedTopicId(null); setSelectedSubjectId(null); }} className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground">
+            <Layers className="h-3.5 w-3.5" /> Trocar
+          </button>
         </div>
 
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="text-accent font-medium">+5 XP por revisão</span>
+          <span>Card {currentIndex + 1} de {sessionQueue.length}</span>
           <span>·</span>
-          <span>Repetição espaçada ativa</span>
+          <span className="text-primary font-medium cursor-help" title="Cards separados por: 1º Novos, 2º Errados, 3º Antigos corretos">Algoritmo Inteligente</span>
         </div>
 
         <FlashcardViewer
-          key={flashcards[currentIndex].id}
-          card={flashcards[currentIndex]}
+          key={currentFlashcard.id}
+          card={currentFlashcard}
           onRate={handleRate}
         />
       </div>

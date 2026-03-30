@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { User } from "@/types/study";
 import * as authService from "@/services/authService";
+import { supabase } from "@/lib/supabase";
 
 interface AuthContextType {
   user: User | null;
@@ -8,10 +9,10 @@ interface AuthContextType {
   isAdmin: boolean;
   isApproved: boolean;
   loading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: typeof authService.login;
+  register: typeof authService.register;
   logout: () => void;
-  refreshUser: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -20,17 +21,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = () => {
-    const current = authService.getCurrentUser();
-    setUser(current);
+  const refreshUser = async (userId?: string) => {
+    try {
+      if (!userId) {
+        const { data } = await supabase.auth.getUser();
+        userId = data.user?.id;
+      }
+      if (userId) {
+        const profile = await authService.fetchProfile(userId);
+        setUser(profile);
+      } else {
+        setUser(null);
+      }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   useEffect(() => {
-    // Seed admin on first load
-    authService.seedAdmin().then(() => {
-      refreshUser();
-      setLoading(false);
+    // Initial fetch
+    refreshUser().finally(() => setLoading(false));
+
+    // Listen to changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+        setLoading(false);
+      } else if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
+        // We do NOT block the auth event loop with awaits. We just trigger background refresh.
+        // login() already handles setUser on sign in.
+        if (session?.user && !user) {
+          refreshUser(session.user.id);
+        }
+      }
     });
+
+    return () => { subscription.unsubscribe(); };
   }, []);
 
   const login = async (email: string, password: string) => {
@@ -43,14 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (name: string, email: string, password: string) => {
     const result = await authService.register(name, email, password);
-    if (result.success && result.user) {
-      setUser(result.user);
-    }
     return { success: result.success, error: result.error };
   };
 
-  const logout = () => {
-    authService.logout();
+  const logout = async () => {
+    await authService.logout();
     setUser(null);
   };
 
@@ -65,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         logout,
-        refreshUser,
+        refreshUser: () => refreshUser(),
       }}
     >
       {children}

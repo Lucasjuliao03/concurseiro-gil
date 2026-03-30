@@ -1,41 +1,58 @@
+import { supabase } from "@/lib/supabase";
 import { User, UserRole } from "@/types/study";
-import { getItem, setItem, getList, STORAGE_KEYS } from "./storageService";
 
-// Simple hash for localStorage-only auth (NOT production-grade crypto)
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + "_concurseiro_salt_2024");
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
+export async function fetchProfile(userId: string): Promise<User | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
 
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
-}
+  if (error || !data) return null;
 
-// Admin seed — created on first app load
-const ADMIN_EMAIL = "admin@concurseirogil.com";
-const ADMIN_PASSWORD = "admin123";
-const ADMIN_NAME = "Administrador";
-
-export async function seedAdmin(): Promise<void> {
-  const users = getList<User>(STORAGE_KEYS.USERS);
-  const adminExists = users.some((u) => u.email === ADMIN_EMAIL);
-  if (adminExists) return;
-
-  const hash = await hashPassword(ADMIN_PASSWORD);
-  const admin: User = {
-    id: "admin_001",
-    name: ADMIN_NAME,
-    email: ADMIN_EMAIL,
-    passwordHash: hash,
-    role: "admin",
-    isApproved: true,
-    createdAt: new Date().toISOString(),
+  // Since Supabase trigger assigns full_name from raw_user_meta_data,
+  // we use it. We may not have email natively in the profile.
+  return {
+    id: data.id,
+    name: data.full_name,
+    email: data.username || "user@example.com", // username or email mapping
+    role: data.role as UserRole,
+    isApproved: data.is_active,
+    createdAt: data.created_at,
+    passwordHash: "", // Redacted for security
   };
-  users.push(admin);
-  setItem(STORAGE_KEYS.USERS, users);
+}
+
+export async function login(
+  email: string,
+  password: string
+): Promise<{ success: boolean; error?: string; user?: User }> {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    let msg = "Email ou senha inválidos.";
+    if (error.message.includes("Invalid login")) msg = "Credenciais inválidas. Verifique se você confirmou seu e-mail.";
+    return { success: false, error: msg };
+  }
+
+  if (data.user) {
+    const profile = await fetchProfile(data.user.id);
+    if (profile) return { success: true, user: profile };
+    
+    // Fallback if the database trigger didn't run properly
+    return { 
+      success: true, 
+      user: {
+        id: data.user.id,
+        name: data.user.user_metadata?.full_name || email.split("@")[0],
+        email: email,
+        role: "student",
+        isApproved: false,
+        createdAt: data.user.created_at,
+        passwordHash: "",
+      } 
+    };
+  }
+  return { success: true };
 }
 
 export async function register(
@@ -43,83 +60,67 @@ export async function register(
   email: string,
   password: string
 ): Promise<{ success: boolean; error?: string; user?: User }> {
-  const users = getList<User>(STORAGE_KEYS.USERS);
-
-  if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-    return { success: false, error: "Este email já está cadastrado." };
+  if (password.length < 6) {
+    return { success: false, error: "A senha deve ter no mínimo 6 caracteres." };
   }
 
-  if (password.length < 4) {
-    return { success: false, error: "A senha deve ter no mínimo 4 caracteres." };
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: name,
+      },
+    },
+  });
+
+  if (error) {
+    let msg = error.message;
+    if (msg.toLowerCase().includes("rate limit")) {
+      msg = "Muitas tentativas. Tente novamente mais tarde.";
+    } else if (msg.includes("already registered")) {
+      msg = "E-mail já está em uso.";
+    }
+    return { success: false, error: msg };
   }
 
-  const hash = await hashPassword(password);
-  const newUser: User = {
-    id: generateId(),
-    name,
-    email: email.toLowerCase(),
-    passwordHash: hash,
-    role: "user" as UserRole,
-    isApproved: false,
-    createdAt: new Date().toISOString(),
-  };
+  // Se o Supabase exigir confirmação de e-mail, a session virá nula.
+  // Nesse caso, o usuário não está logado ainda.
+  if (!data.session) {
+    return { success: false, error: "Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar." };
+  }
 
-  users.push(newUser);
-  setItem(STORAGE_KEYS.USERS, users);
-  setItem(STORAGE_KEYS.CURRENT_USER_ID, newUser.id);
-
-  return { success: true, user: newUser };
+  return { success: true };
 }
 
-export async function login(
-  email: string,
-  password: string
-): Promise<{ success: boolean; error?: string; user?: User }> {
-  const users = getList<User>(STORAGE_KEYS.USERS);
-  const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-
-  if (!user) {
-    return { success: false, error: "Email ou senha inválidos." };
-  }
-
-  const hash = await hashPassword(password);
-  if (user.passwordHash !== hash) {
-    return { success: false, error: "Email ou senha inválidos." };
-  }
-
-  setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
-  return { success: true, user };
-}
-
-export function logout(): void {
-  setItem(STORAGE_KEYS.CURRENT_USER_ID, null);
+export async function logout(): Promise<void> {
+  await supabase.auth.signOut();
 }
 
 export function getCurrentUser(): User | null {
-  const userId = getItem<string>(STORAGE_KEYS.CURRENT_USER_ID);
-  if (!userId) return null;
-  const users = getList<User>(STORAGE_KEYS.USERS);
-  return users.find((u) => u.id === userId) ?? null;
+  // Synchronous getter is deprecated when using Supabase,
+  // rely on AuthContext for current user instead.
+  return null;
 }
 
-export function getAllUsers(): User[] {
-  return getList<User>(STORAGE_KEYS.USERS);
+export async function getAllUsers(): Promise<User[]> {
+  const { data, error } = await supabase.from("profiles").select("*");
+  if (error || !data) return [];
+  return data.map((d) => ({
+    id: d.id,
+    name: d.full_name,
+    email: d.username || "",
+    role: d.role as UserRole,
+    isApproved: d.is_active,
+    createdAt: d.created_at,
+    passwordHash: "",
+  }));
 }
 
-export function approveUser(userId: string): void {
-  const users = getList<User>(STORAGE_KEYS.USERS);
-  const idx = users.findIndex((u) => u.id === userId);
-  if (idx !== -1) {
-    users[idx].isApproved = true;
-    setItem(STORAGE_KEYS.USERS, users);
-  }
+export async function approveUser(userId: string): Promise<void> {
+  await supabase.from("profiles").update({ is_active: true }).eq("id", userId);
 }
 
-export function blockUser(userId: string): void {
-  const users = getList<User>(STORAGE_KEYS.USERS);
-  const idx = users.findIndex((u) => u.id === userId);
-  if (idx !== -1) {
-    users[idx].isApproved = false;
-    setItem(STORAGE_KEYS.USERS, users);
-  }
+export async function blockUser(userId: string): Promise<void> {
+  await supabase.from("profiles").update({ is_active: false }).eq("id", userId);
 }

@@ -1,24 +1,25 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/AppLayout";
-import { questions, subjects } from "@/data/questionsDb";
 import { Question } from "@/types/study";
 import { CheckCircle2, XCircle, ChevronRight, Filter, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { canAnswer, getAnsweredCount } from "@/services/accessService";
-import { recordAnswer } from "@/services/statsService";
+import { canAnswer, getRemainingFreeQuestions } from "@/services/accessService";
+import { getUserCourseId } from "@/services/courseService";
+import { useSubjects, useQuestions, useRecordAnswer, useUserProductivity, useTopics, useUserQuestionStats } from "@/hooks/useStudyData";
+import { useMemo } from "react";
 import { BlockedOverlay } from "@/components/BlockedOverlay";
 
-function QuestionCard({ question, onNext, onAnswer }: {
+function QuestionCard({ question, subjectName, subjectIcon, onNext, onAnswer }: {
   question: Question;
+  subjectName?: string;
+  subjectIcon?: string;
   onNext: () => void;
   onAnswer: (isCorrect: boolean, selectedOption: string) => void;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-
-  const subject = subjects.find((s) => s.id === question.subjectId);
   const isCorrect = selected === question.correctOption;
 
   const handleConfirm = () => {
@@ -44,7 +45,7 @@ function QuestionCard({ question, onNext, onAnswer }: {
     <div className="space-y-4 animate-slide-up">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="text-xs border-primary/30 text-primary">
-          {subject?.icon} {subject?.name}
+          {subjectIcon} {subjectName}
         </Badge>
         <Badge variant="outline" className={cn("text-xs", difficultyColor[question.difficulty])}>
           {question.difficulty}
@@ -63,7 +64,6 @@ function QuestionCard({ question, onNext, onAnswer }: {
           const letter = opt.id.toUpperCase();
           const isSelected = selected === opt.id;
           const isRight = opt.id === question.correctOption;
-
           let optStyle = "bg-card border-border hover:border-primary/40";
           if (confirmed) {
             if (isRight) optStyle = "bg-success/10 border-success/40";
@@ -74,25 +74,15 @@ function QuestionCard({ question, onNext, onAnswer }: {
           }
 
           return (
-            <button
-              key={opt.id}
-              onClick={() => !confirmed && setSelected(opt.id)}
-              disabled={confirmed}
-              className={cn(
-                "w-full flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all active:scale-[0.98]",
-                optStyle
-              )}
-            >
-              <span className={cn(
-                "flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold",
+            <button key={opt.id} onClick={() => !confirmed && setSelected(opt.id)} disabled={confirmed}
+              className={cn("w-full flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all active:scale-[0.98]", optStyle)}>
+              <span className={cn("flex-shrink-0 flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold",
                 confirmed && isRight ? "bg-success text-success-foreground" :
                 confirmed && isSelected && !isRight ? "bg-destructive text-destructive-foreground" :
-                isSelected ? "bg-primary text-primary-foreground" :
-                "bg-muted text-muted-foreground"
+                isSelected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
               )}>
                 {confirmed && isRight ? <CheckCircle2 className="h-4 w-4" /> :
-                 confirmed && isSelected && !isRight ? <XCircle className="h-4 w-4" /> :
-                 letter}
+                 confirmed && isSelected && !isRight ? <XCircle className="h-4 w-4" /> : letter}
               </span>
               <span className="text-sm text-foreground leading-relaxed flex-1">{opt.text}</span>
             </button>
@@ -101,24 +91,15 @@ function QuestionCard({ question, onNext, onAnswer }: {
       </div>
 
       {!confirmed ? (
-        <button
-          onClick={handleConfirm}
-          disabled={!selected}
-          className={cn(
-            "w-full rounded-xl py-3.5 font-semibold text-sm transition-all",
-            selected
-              ? "bg-primary text-primary-foreground active:scale-[0.98]"
-              : "bg-muted text-muted-foreground cursor-not-allowed"
-          )}
-        >
+        <button onClick={handleConfirm} disabled={!selected}
+          className={cn("w-full rounded-xl py-3.5 font-semibold text-sm transition-all",
+            selected ? "bg-primary text-primary-foreground active:scale-[0.98]" : "bg-muted text-muted-foreground cursor-not-allowed"
+          )}>
           Confirmar Resposta
         </button>
       ) : (
         <div className="space-y-3 animate-slide-up">
-          <div className={cn(
-            "rounded-xl p-4 border",
-            isCorrect ? "bg-success/10 border-success/30" : "bg-destructive/10 border-destructive/30"
-          )}>
+          <div className={cn("rounded-xl p-4 border", isCorrect ? "bg-success/10 border-success/30" : "bg-destructive/10 border-destructive/30")}>
             <div className="flex items-center gap-2 mb-2">
               {isCorrect ? <CheckCircle2 className="h-5 w-5 text-success" /> : <XCircle className="h-5 w-5 text-destructive" />}
               <span className={cn("font-bold text-sm", isCorrect ? "text-success" : "text-destructive")}>
@@ -127,11 +108,8 @@ function QuestionCard({ question, onNext, onAnswer }: {
             </div>
             <p className="text-sm text-foreground/80 leading-relaxed">{question.explanation}</p>
           </div>
-
-          <button
-            onClick={handleNext}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-semibold text-sm text-primary-foreground active:scale-[0.98] transition-all"
-          >
+          <button onClick={handleNext}
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-semibold text-sm text-primary-foreground active:scale-[0.98] transition-all">
             Próxima Questão <ChevronRight className="h-4 w-4" />
           </button>
         </div>
@@ -142,58 +120,264 @@ function QuestionCard({ question, onNext, onAnswer }: {
 
 export default function QuestoesPage() {
   const { user, isApproved } = useAuth();
+  const { data: subjects = [], isLoading: loadingSub } = useSubjects();
+  const { data: topics = [], isLoading: loadingTop } = useTopics();
+  const { data: questions = [], isLoading: loadingQ } = useQuestions();
+  const { data: todayProd } = useUserProductivity(user?.id);
+  const { data: qStats = [], isLoading: loadingStats } = useUserQuestionStats(user?.id);
+  const recordAnswer = useRecordAnswer();
+
+  const [selectedSource, setSelectedSource] = useState<"all" | "ia" | "banca" | null>(null);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [blocked, setBlocked] = useState(!canAnswer());
-  const answeredCount = user ? getAnsweredCount(user.id) : 0;
+  const [sessionQueue, setSessionQueue] = useState<typeof questions>([]);
+  const [isFinished, setIsFinished] = useState(false);
+
+  // We are not strictly filtering subjects by `course.subjectIds` anymore since courses are dynamic and might not have mapped edicts yet.
+  // Instead, we just require the user to have a course selected in Index, but here we can show all active subjects.
+  const courseId = user ? getUserCourseId(user.id) : null;
+  const filteredSubjects = subjects;
+  
+  // Filter questions by source if one is selected
+  const sourceFilteredQuestions = questions.filter(q => {
+    if (selectedSource === "all") return true;
+    if (selectedSource === "ia") return q.organ === "IA";
+    if (selectedSource === "banca") return q.organ !== "IA";
+    return true;
+  });
+
+  const filteredTopics = topics.filter(t => String(t.subject_id) === selectedSubjectId);
+
+  const startSession = (topicId: string) => {
+    setSelectedTopicId(topicId);
+    setCurrentIndex(0);
+    setIsFinished(false);
+
+    const topicQuestions = sourceFilteredQuestions.filter(q => 
+      topicId === "general" ? q.subjectId === selectedSubjectId : 
+      q.topicId === topicId || q.subjectId === selectedSubjectId && !q.topicId
+    );
+
+    const sorted = [...topicQuestions].sort((a, b) => {
+      const statA = qStats.find(s => String(s.question_id) === a.id);
+      const statB = qStats.find(s => String(s.question_id) === b.id);
+
+      const getPriority = (stat: any) => {
+        if (!stat) return 1; 
+        if (stat.last_is_correct === false) return 2; 
+        return 3; 
+      };
+
+      const pA = getPriority(statA);
+      const pB = getPriority(statB);
+
+      if (pA !== pB) return pA - pB;
+
+      if (statA && statB) {
+        const timeA = new Date(statA.last_answered_at || 0).getTime();
+        const timeB = new Date(statB.last_answered_at || 0).getTime();
+        return timeA - timeB; 
+      }
+      return 0;
+    });
+
+    setSessionQueue(sorted);
+  };
+
+  const answeredCount = todayProd?.questions_answered ?? 0;
+  const hasAccess = canAnswer(user);
 
   const handleAnswer = (isCorrect: boolean, selectedOption: string) => {
-    if (user) {
-      recordAnswer(user.id, questions[currentIndex].id, selectedOption, isCorrect);
-      // Recheck access
-      if (!canAnswer()) {
-        setBlocked(true);
-      }
+    if (user && sessionQueue[currentIndex]) {
+      recordAnswer.mutate({
+        userId: user.id,
+        questionId: parseInt(sessionQueue[currentIndex].id),
+        selectedOption,
+        isCorrect,
+      });
     }
   };
 
   const handleNext = () => {
-    if (!canAnswer()) {
-      setBlocked(true);
-      return;
+    if (currentIndex + 1 >= sessionQueue.length) {
+      setIsFinished(true);
+    } else {
+      setCurrentIndex((prev) => prev + 1);
     }
-    setCurrentIndex((prev) => (prev + 1) % questions.length);
   };
 
-  if (blocked && !isApproved) {
+  if (!hasAccess && !isApproved) {
+    return <AppLayout><BlockedOverlay answeredCount={answeredCount} /></AppLayout>;
+  }
+
+  if (loadingQ || loadingSub || loadingTop || loadingStats) {
+    return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando questões...</div></AppLayout>;
+  }
+
+  // --- SELECTION SCREENS ---
+
+  if (!selectedSource) {
     return (
       <AppLayout>
-        <BlockedOverlay answeredCount={answeredCount} />
+        <div className="px-4 pt-6 space-y-6 animate-fade-in pb-20">
+          <div>
+            <h1 className="text-xl font-bold text-foreground flex items-center gap-2 mb-2"><Filter className="h-5 w-5 text-primary" /> Origem das Questões</h1>
+            <p className="text-sm text-muted-foreground">Escolha o tipo de questão que deseja resolver agora.</p>
+          </div>
+          <div className="space-y-3">
+            <button onClick={() => setSelectedSource("ia")}
+              className="w-full p-4 rounded-xl bg-card border border-border text-left hover:border-primary/50 transition-all active:scale-[0.98]">
+              <h3 className="font-semibold text-sm text-foreground mb-1">Criadas por IA 🤖</h3>
+              <p className="text-xs text-muted-foreground">Questões inéditas geradas pela nossa Inteligência Artificial.</p>
+            </button>
+            <button onClick={() => setSelectedSource("banca")}
+              className="w-full p-4 rounded-xl bg-card border border-border text-left hover:border-primary/50 transition-all active:scale-[0.98]">
+              <h3 className="font-semibold text-sm text-foreground mb-1">Questões da Banca 🏛️</h3>
+              <p className="text-xs text-muted-foreground">Questões reais extraídas de provas anteriores.</p>
+            </button>
+            <button onClick={() => setSelectedSource("all")}
+              className="w-full p-4 rounded-xl bg-card border border-border text-left hover:border-primary/50 transition-all active:scale-[0.98]">
+              <h3 className="font-semibold text-sm text-foreground mb-1">Variadas (Ambas) 🔀</h3>
+              <p className="text-xs text-muted-foreground">Mistura de questões da Banca e criadas por IA.</p>
+            </button>
+          </div>
+        </div>
       </AppLayout>
     );
   }
 
+  if (!selectedSubjectId) {
+    return (
+      <AppLayout>
+        <div className="px-4 pt-6 space-y-6 animate-fade-in pb-20">
+          <div>
+            <button onClick={() => setSelectedSource(null)} className="text-primary text-sm font-medium mb-3 hover:underline">
+              &larr; Voltar para Origem
+            </button>
+            <h1 className="text-xl font-bold text-foreground flex items-center gap-2 mb-2"><BookOpen className="h-5 w-5 text-primary" /> Escolha uma Matéria</h1>
+            <p className="text-sm text-muted-foreground">Selecione o que deseja estudar agora.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {filteredSubjects.map(sub => (
+              <button key={sub.id} onClick={() => setSelectedSubjectId(sub.id)}
+                className="p-4 rounded-2xl bg-card border border-border text-left hover:border-primary/50 transition-all active:scale-[0.98]">
+                <div className="text-2xl mb-2">{sub.icon}</div>
+                <h3 className="font-semibold text-sm text-foreground line-clamp-2">{sub.name}</h3>
+              </button>
+            ))}
+            {filteredSubjects.length === 0 && (
+              <p className="col-span-2 text-center text-muted-foreground py-8">Nenhuma matéria disponível neste curso.</p>
+            )}
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!selectedTopicId) {
+    return (
+      <AppLayout>
+        <div className="px-4 pt-6 space-y-6 animate-fade-in pb-20">
+          <div>
+            <button onClick={() => setSelectedSubjectId(null)} className="text-primary text-sm font-medium mb-3 hover:underline">
+              &larr; Matérias
+            </button>
+            <h1 className="text-xl font-bold text-foreground">Escolha o Tema</h1>
+            <p className="text-sm text-muted-foreground">Filtre as questões pelo tema específico.</p>
+          </div>
+          <div className="space-y-3">
+            {filteredTopics.map(topic => {
+              const count = sourceFilteredQuestions.filter(q => q.topicId === String(topic.id) || q.subjectId === selectedSubjectId && !q.topicId).length;
+              return (
+                <button key={topic.id} onClick={() => startSession(String(topic.id))} disabled={count === 0}
+                  className="w-full p-4 rounded-xl bg-card border border-border text-left flex justify-between items-center hover:border-primary/50 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
+                  <span className="font-medium text-sm text-foreground">{topic.name}</span>
+                  <Badge variant="secondary">{count} qsts</Badge>
+                </button>
+              );
+            })}
+            <button onClick={() => startSession("general")}
+                className="w-full p-4 rounded-xl bg-card border border-border text-left flex justify-between items-center hover:border-primary/50 transition-all active:scale-[0.98]">
+              <span className="font-medium text-sm text-foreground">Todos os tópicos / Geral</span>
+              <Badge variant="secondary">{sourceFilteredQuestions.filter(q => q.subjectId === selectedSubjectId).length} qsts</Badge>
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // --- PLAYER SCREEN ---
+
+  if (sessionQueue.length === 0) {
+    return (
+      <AppLayout>
+        <div className="p-8 text-center space-y-4">
+          <p className="text-muted-foreground">Nenhuma questão encontrada.</p>
+          <button onClick={() => setSelectedTopicId(null)} className="text-primary text-sm font-medium hover:underline">
+            &larr; Voltar
+          </button>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (isFinished) {
+    return (
+      <AppLayout>
+        <div className="px-4 pt-12 pb-20 space-y-6 text-center animate-fade-in flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="w-20 h-20 bg-success/10 rounded-full flex items-center justify-center mb-2">
+            <CheckCircle2 className="h-10 w-10 text-success" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground mb-2">Tema Concluído!</h2>
+            <p className="text-muted-foreground text-sm max-w-xs mx-auto">
+              Você respondeu todas as questões deste tema. Ótimo trabalho!
+            </p>
+          </div>
+          
+          <div className="space-y-3 w-full max-w-sm mt-8">
+            <button onClick={() => setSelectedTopicId(null)}
+              className="w-full bg-primary text-primary-foreground font-semibold rounded-xl py-3.5 transition-all active:scale-[0.98]">
+              Escolher Outro Tema
+            </button>
+            <button onClick={() => startSession(selectedTopicId)}
+              className="w-full bg-secondary text-secondary-foreground font-semibold rounded-xl py-3.5 transition-all active:scale-[0.98]">
+              Responder Novamente
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const currentQuestion = sessionQueue[currentIndex];
+  const subject = subjects.find(s => s.id === currentQuestion.subjectId);
+
   return (
     <AppLayout>
-      <div className="px-4 pt-6 space-y-4">
+      <div className="px-4 pt-6 space-y-4 pb-20">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-5 w-5 text-primary" />
-            <h1 className="text-xl font-bold text-foreground">Questões</h1>
-          </div>
-          <button className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground">
-            <Filter className="h-3.5 w-3.5" /> Filtrar
+          <button onClick={() => setSelectedTopicId(null)} className="text-primary pr-4 text-sm font-medium hover:underline truncate max-w-[200px]">
+             &larr; Voltar
+          </button>
+          <button onClick={() => { setSelectedTopicId(null); setSelectedSubjectId(null); setSelectedSource(null); }} className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground">
+            <Filter className="h-3.5 w-3.5" /> Trocar
           </button>
         </div>
 
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Questão {currentIndex + 1} de {questions.length}</span>
+          <span>Questão {currentIndex + 1} de {sessionQueue.length}</span>
           <span>·</span>
-          <span className="text-primary font-medium">+15 XP por acerto</span>
+          <span className="text-primary font-medium cursor-help" title="Questões separadas por: 1º Novas, 2º Erradas, 3º Antigas corretas">Algoritmo Inteligente</span>
         </div>
 
         <QuestionCard
-          key={questions[currentIndex].id}
-          question={questions[currentIndex]}
+          key={currentQuestion.id}
+          question={currentQuestion}
+          subjectName={subject?.name ?? "Geral"}
+          subjectIcon={subject?.icon ?? "📖"}
           onNext={handleNext}
           onAnswer={handleAnswer}
         />
