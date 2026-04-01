@@ -5,7 +5,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ProtectedRoute, AdminRoute } from "@/components/ProtectedRoute";
+import { useServiceWorker } from "@/hooks/useServiceWorker";
 import Index from "./pages/Index";
 import Questoes from "./pages/Questoes";
 import Flashcards from "./pages/Flashcards";
@@ -14,6 +16,7 @@ import Perfil from "./pages/Perfil";
 import Login from "./pages/Login";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
+import Achievements from "./pages/Achievements";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminUsers from "./pages/admin/AdminUsers";
@@ -73,6 +76,7 @@ const AppRoutes = () => {
           <Route path="/flashcards" element={<ProtectedRoute><Flashcards /></ProtectedRoute>} />
           <Route path="/resumos" element={<ProtectedRoute><Resumos /></ProtectedRoute>} />
           <Route path="/perfil" element={<ProtectedRoute><Perfil /></ProtectedRoute>} />
+          <Route path="/medalhas" element={<ProtectedRoute><Achievements /></ProtectedRoute>} />
           
           <Route path="/admin" element={<ProtectedRoute><AdminRoute><Admin /></AdminRoute></ProtectedRoute>} />
           
@@ -90,18 +94,24 @@ const AppRoutes = () => {
   );
 };
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+const App = () => {
+  useServiceWorker();
+  
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <NotificationProvider>
+              <AppRoutes />
+            </NotificationProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

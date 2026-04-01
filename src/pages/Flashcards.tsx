@@ -4,7 +4,7 @@ import { Layers, RotateCcw, X, Check, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { canAnswer } from "@/services/accessService";
+import { canAccessContent, isUserActive } from "@/services/accessService";
 import { Flashcard } from "@/types/study";
 import { useSubjects, useFlashcards, useRecordFlashcardReview, useUserProductivity, useTopics, useUserFlashcardReviews } from "@/hooks/useStudyData";
 import { useMemo } from "react";
@@ -80,8 +80,9 @@ function FlashcardViewer({ card, onRate }: {
 }
 
 export default function FlashcardsPage() {
-  const { user, isApproved } = useAuth();
-  const { data: subjects = [], isLoading: loadingSub } = useSubjects();
+  const { user, isApproved, isAdmin } = useAuth();
+  const courseId = user?.courseId ? String(user.courseId) : null;
+  const { data: subjects = [], isLoading: loadingSub } = useSubjects(isAdmin ? undefined : courseId);
   const { data: topics = [], isLoading: loadingTop } = useTopics();
   const { data: flashcards = [], isLoading: loadingF } = useFlashcards();
   const { data: userReviews = [], isLoading: loadingStats } = useUserFlashcardReviews(user?.id);
@@ -136,11 +137,29 @@ export default function FlashcardsPage() {
     setSessionQueue(sorted);
   };
 
-  const hasAccess = canAnswer(user);
   const answeredCount = todayProd?.questions_answered ?? 0;
+  const flashcardsCount = todayProd?.flashcards_reviewed ?? 0;
+  const totalUsage = answeredCount + flashcardsCount;
+  const active = isUserActive(user);
+  const limitReached = !canAccessContent(user, totalUsage);
 
-  if (!hasAccess && !isApproved) {
-    return <AppLayout><BlockedOverlay answeredCount={answeredCount} /></AppLayout>;
+  if (!active) {
+    return <AppLayout><BlockedOverlay reason="expired" /></AppLayout>;
+  }
+
+  if (limitReached && !isApproved) {
+    return <AppLayout><BlockedOverlay answeredCount={totalUsage} reason="limit_reached" /></AppLayout>;
+  }
+
+  if (!isAdmin && !courseId) {
+    return (
+      <AppLayout>
+        <div className="p-8 text-center mt-10 animate-fade-in">
+          <h2 className="text-xl font-bold text-foreground mb-2">Acesso Restrito</h2>
+          <p className="text-muted-foreground text-sm">Você precisa ter um curso vinculado à sua conta para acessar os flashcards. Entre em contato com a equipe.</p>
+        </div>
+      </AppLayout>
+    );
   }
 
   if (loadingF || loadingSub || loadingTop || loadingStats) {

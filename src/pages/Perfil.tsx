@@ -2,9 +2,12 @@ import { AppLayout } from "@/components/AppLayout";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/contexts/AuthContext";
 import { buildStats, getSubjectPerformance, ranks } from "@/services/statsService";
-import { User, ChevronRight, Medal, Flame, Zap, LogOut, TrendingUp } from "lucide-react";
+import { User, ChevronRight, Medal, Flame, Zap, LogOut, TrendingUp, Trophy } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSubjects, useQuestions, useUserProfile, useUserProductivity, useUserQuestionStats } from "@/hooks/useStudyData";
+import { useAchievementStats } from "@/hooks/useAchievements";
+import { NotificationSettings } from "@/components/NotificationSettings";
+import { PerformanceCard } from "@/components/PerformanceCard";
 
 export default function PerfilPage() {
   const { user, isAdmin, logout } = useAuth();
@@ -14,9 +17,60 @@ export default function PerfilPage() {
   const { data: profile } = useUserProfile(user?.id);
   const { data: todayProd } = useUserProductivity(user?.id);
   const { data: qStats = [] } = useUserQuestionStats(user?.id);
+  const achievementStats = useAchievementStats(user?.id);
 
   const stats = buildStats(profile, todayProd);
   const performance = !loadingQ && !loadingSub ? getSubjectPerformance(qStats, questions, subjects) : [];
+  
+  const subjectStats = performance.map((sp: any) => {
+    const subject = subjects.find((s: any) => s.id === sp.subjectId);
+    const subjectQuestionIds = questions
+      .filter((q: any) => q.subjectId === sp.subjectId)
+      .map((q: any) => String(q.id));
+    const relevantStats = qStats.filter((qs: any) => subjectQuestionIds.includes(String(qs.question_id)));
+
+    const totalCorrect = relevantStats.reduce((sum: number, s: any) => sum + (s.total_correct || 0), 0);
+    const totalWrong = sp.totalAttempts - totalCorrect;
+
+    const topicMap = new Map<string, any>();
+    relevantStats.forEach((qs: any) => {
+      const question = questions.find((q: any) => String(q.id) === String(qs.question_id));
+      if (question && question.topicId) {
+        const topicKey = String(question.topicId);
+        if (!topicMap.has(topicKey)) {
+          topicMap.set(topicKey, {
+            id: question.topicId,
+            name: question.topic || "Geral",
+            totalAttempts: 0,
+            totalCorrect: 0,
+            totalWrong: 0,
+            accuracy: 0,
+          });
+        }
+        const t = topicMap.get(topicKey);
+        t.totalAttempts += (qs.total_attempts || 0);
+        t.totalCorrect += (qs.total_correct || 0);
+      }
+    });
+    topicMap.forEach((t: any) => {
+      t.totalWrong = t.totalAttempts - t.totalCorrect;
+      if (t.totalAttempts > 0) {
+        t.accuracy = Math.round((t.totalCorrect / t.totalAttempts) * 100);
+      }
+    });
+    const topics = Array.from(topicMap.values()).filter((t: any) => t.totalAttempts > 0);
+
+    return {
+      subjectId: sp.subjectId,
+      name: sp.name,
+      icon: subject?.icon || "📖",
+      totalAttempts: sp.totalAttempts,
+      totalCorrect,
+      totalWrong,
+      accuracy: sp.accuracy,
+      topics,
+    };
+  });
 
   const currentRank = ranks.find((r) => r.level === stats.level) ?? ranks[0];
   const nextRank = ranks.find((r) => r.level === stats.level + 1);
@@ -58,20 +112,20 @@ export default function PerfilPage() {
 
         {/* Rank card */}
         <div className="rounded-2xl bg-gradient-to-br from-xp/20 to-xp/5 border border-xp/20 p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Medal className="h-5 w-5 text-xp" />
-              <span className="font-bold text-foreground">{stats.rank}</span>
-            </div>
-            <div className="flex items-center gap-1 bg-xp/20 px-2.5 py-1 rounded-full">
-              <Zap className="h-3.5 w-3.5 text-xp" />
-              <span className="text-sm font-bold text-xp">{stats.xp} XP</span>
+          <div className="flex items-center gap-2 overflow-hidden">
+            <Medal className="h-5 w-5 text-xp flex-shrink-0" />
+            <span className="font-bold text-foreground text-sm">{stats.rank}</span>
+            <div className="h-4 w-px bg-xp/30 mx-1 flex-shrink-0" />
+            <div className="flex items-center gap-1 bg-xp/20 px-2 py-0.5 rounded-full flex-shrink-0">
+              <Zap className="h-3 w-3 text-xp" />
+              <span className="text-xs font-bold text-xp">{stats.xp} XP</span>
             </div>
           </div>
           {nextRank && (
             <div>
               <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                <span>{currentRank.name}</span><span>{nextRank.name}</span>
+                <span className="truncate">{currentRank.name}</span>
+                <span className="truncate">{nextRank.name}</span>
               </div>
               <Progress value={xpProgress} className="h-2 bg-muted [&>div]:bg-xp" />
               <p className="text-xs text-muted-foreground mt-1 text-center">
@@ -97,37 +151,33 @@ export default function PerfilPage() {
           </div>
         </div>
 
-        {/* Subject performance */}
-        <div className="rounded-2xl bg-card border border-border p-4">
-          <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-primary" />
-            Desempenho por Matéria
-          </h3>
-          <div className="space-y-3">
-            {performance.map((sp) => {
-              const subject = subjects.find((s) => s.id === sp.subjectId);
-              return (
-                <div key={sp.subjectId}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-foreground font-medium flex items-center gap-1.5">
-                      {subject?.icon ?? "📖"} {sp.name}
-                    </span>
-                    <span className={`font-bold ${sp.accuracy >= 70 ? "text-success" : sp.accuracy >= 50 ? "text-warning" : "text-destructive"}`}>
-                      {sp.totalAttempts > 0 ? `${sp.accuracy}%` : "—"}
-                    </span>
-                  </div>
-                  <Progress value={sp.accuracy} className="h-1.5 bg-muted" />
-                  <p className="text-xs text-muted-foreground mt-0.5">{sp.totalAttempts} questões respondidas</p>
-                </div>
-              );
-            })}
-            {performance.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-3">
-                Responda questões para ver seu desempenho.
+        {/* Medalhas */}
+        <Link to="/medalhas"
+          className="flex items-center justify-between rounded-2xl bg-gradient-to-br from-warning/15 to-warning/5 border border-warning/25 p-4 transition-all active:scale-[0.98]">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-warning/20 flex items-center justify-center">
+              <Trophy className="h-6 w-6 text-warning" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">Minhas Medalhas</p>
+              <p className="text-xs text-muted-foreground">
+                {achievementStats.unlockedCount}/{achievementStats.totalCount} conquistas
               </p>
-            )}
+            </div>
           </div>
-        </div>
+          <div className="flex items-center gap-2">
+            <div className="text-right">
+              <p className="text-lg font-black text-warning">{achievementStats.percentage}%</p>
+            </div>
+            <ChevronRight className="h-5 w-5 text-warning" />
+          </div>
+        </Link>
+
+        {/* Notificações */}
+        <NotificationSettings />
+
+        {/* Desempenho */}
+        <PerformanceCard subjects={subjectStats} isLoading={loadingQ || loadingSub} />
       </div>
     </AppLayout>
   );

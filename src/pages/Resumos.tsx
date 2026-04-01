@@ -5,10 +5,14 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSubjects, useSummaries, SUBJECT_UI_MAP } from "@/hooks/useStudyData";
+import { canAccessSummaries, isUserActive } from "@/services/accessService";
+import { BlockedOverlay } from "@/components/BlockedOverlay";
 
 export default function ResumosPage() {
   const { user } = useAuth();
-  const { data: subjects = [], isLoading: loadingSub } = useSubjects();
+  const isAdmin = user?.role === 'admin';
+  const courseId = user?.courseId ? String(user.courseId) : null;
+  const { data: subjects = [], isLoading: loadingSub } = useSubjects(isAdmin ? undefined : courseId);
   const { data: summaries = [], isLoading: loadingSum } = useSummaries();
 
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
@@ -17,6 +21,41 @@ export default function ResumosPage() {
   if (loadingSub || loadingSum) {
     return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando resumos...</div></AppLayout>;
   }
+
+  const active = isUserActive(user);
+  
+  const viewedStr = localStorage.getItem(`viewed_summaries_${user?.id}`) || "[]";
+  const viewedSummaries: string[] = JSON.parse(viewedStr);
+  const readCount = viewedSummaries.length;
+  const summaryLimitReached = !canAccessSummaries(user, readCount);
+
+  if (!active) {
+    return <AppLayout><BlockedOverlay reason="expired" /></AppLayout>;
+  }
+
+  if (summaryLimitReached && !user?.isApproved && !selectedSummaryId) {
+    return <AppLayout><BlockedOverlay readCount={readCount} reason="limit_reached" /></AppLayout>;
+  }
+
+  if (!isAdmin && !courseId) {
+    return (
+      <AppLayout>
+        <div className="p-8 text-center mt-10 animate-fade-in">
+          <h2 className="text-xl font-bold text-foreground mb-2">Acesso Restrito</h2>
+          <p className="text-muted-foreground text-sm">Você precisa ter um curso vinculado à sua conta para acessar os resumos. Entre em contato com a equipe.</p>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const handleSelectSummary = (id: string) => {
+    if (!user?.isApproved && !viewedSummaries.includes(id)) {
+      if (readCount >= 2) return; // Prevent opening if limit reached, though UI covers it
+      viewedSummaries.push(id);
+      localStorage.setItem(`viewed_summaries_${user?.id}`, JSON.stringify(viewedSummaries));
+    }
+    setSelectedSummaryId(id);
+  };
 
   // Group summaries by subject
   const subjectsWithSummaries = subjects.filter(s =>
@@ -82,7 +121,7 @@ export default function ResumosPage() {
 
           <div className="space-y-2">
             {subjectSummaries.map(summary => (
-              <button key={summary.id} onClick={() => setSelectedSummaryId(summary.id)}
+              <button key={summary.id} onClick={() => handleSelectSummary(summary.id)}
                 className="w-full flex items-center gap-3 rounded-xl bg-card border border-border p-4 text-left transition-all hover:border-primary/40 active:scale-[0.98]">
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10 border border-primary/20">
                   <BookOpen className="h-5 w-5 text-primary" />

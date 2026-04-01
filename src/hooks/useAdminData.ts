@@ -545,3 +545,54 @@ export function useDeleteSummary() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_summaries"] }),
   });
 }
+
+// ---------------------------------------------------------
+// EDICT-SUBJECTS LINK MODULE
+// ---------------------------------------------------------
+
+export function useAdminEdictSubjects(edictId?: number) {
+  return useQuery({
+    queryKey: ["admin_edict_subjects", edictId],
+    queryFn: async () => {
+      if (!edictId) return [];
+      const { data, error } = await supabase
+        .from("edict_subjects")
+        .select("*, subjects(name)")
+        .eq("edict_id", edictId)
+        .order("sort_order");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!edictId,
+  });
+}
+
+export function useAddEdictSubject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { edictId: number; subjectId: number; sortOrder?: number }) => {
+      const { error } = await supabase.from("edict_subjects").insert({
+        edict_id: vars.edictId,
+        subject_id: vars.subjectId,
+        sort_order: vars.sortOrder ?? 0,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_edict_subjects"] }),
+  });
+}
+
+export function useRemoveEdictSubject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { edictId: number; subjectId: number }) => {
+      const { error } = await supabase
+        .from("edict_subjects")
+        .delete()
+        .eq("edict_id", vars.edictId)
+        .eq("subject_id", vars.subjectId);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_edict_subjects"] }),
+  });
+}

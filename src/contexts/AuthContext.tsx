@@ -67,8 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: result.success, error: result.error };
   };
 
-  const register = async (name: string, email: string, password: string) => {
-    const result = await authService.register(name, email, password);
+  const register = async (name: string, email: string, password: string, courseId?: number) => {
+    const result = await authService.register(name, email, password, courseId);
     return { success: result.success, error: result.error };
   };
 

@@ -72,6 +72,8 @@ export interface User {
   role: UserRole;
   isApproved: boolean;
   createdAt: string;
+  courseId?: number;
+  activeUntil?: string | null;
 }
 
 export interface UserAnswer {

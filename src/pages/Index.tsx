@@ -5,17 +5,15 @@ import { Progress } from "@/components/ui/progress";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { buildStats, getSubjectPerformance, ranks } from "@/services/statsService";
-import { canAnswer, getRemainingFreeQuestions } from "@/services/accessService";
-import { getUserCourseId } from "@/services/courseService";
-import { CourseSelector } from "@/components/CourseSelector";
+import { isUserActive, canAccessContent, getRemainingUsage } from "@/services/accessService";
 import { useSubjects, useQuestions, useUserProfile, useUserProductivity, useUserQuestionStats, useCourses } from "@/hooks/useStudyData";
 
 export default function HomePage() {
-  const { user, isApproved } = useAuth();
-  const [courseId, setCourseId] = useState<string | null>(user ? getUserCourseId(user.id) : null);
+  const { user, isApproved, isAdmin } = useAuth();
+  const courseId = user?.courseId ? String(user.courseId) : null;
 
   const { data: courses = [], isLoading: isLoadingCourses } = useCourses();
-  const { data: subjects = [], isLoading: isLoadingSub } = useSubjects();
+  const { data: subjects = [], isLoading: isLoadingSub } = useSubjects(isAdmin ? undefined : courseId);
   const { data: questions = [], isLoading: isLoadingQ } = useQuestions();
   const { data: profile } = useUserProfile(user?.id);
   const { data: todayProd } = useUserProductivity(user?.id);
@@ -26,21 +24,27 @@ export default function HomePage() {
   const stats = buildStats(profile, todayProd);
   const performance = !isLoadingQ && !isLoadingSub ? getSubjectPerformance(qStats, questions, subjects) : [];
   const answeredCount = todayProd?.questions_answered ?? 0;
-  const hasAccess = canAnswer(user);
-  const remaining = getRemainingFreeQuestions(user, answeredCount);
+  const flashcardsCount = todayProd?.flashcards_reviewed ?? 0;
+  const totalUsage = answeredCount + flashcardsCount;
+  const active = isUserActive(user);
+  const hasAccess = active && canAccessContent(user, totalUsage);
+  const remaining = getRemainingUsage(user, totalUsage);
 
   if (isLoadingSub || isLoadingQ || isLoadingCourses) {
     return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando...</div></AppLayout>;
   }
 
-  if (!courseId || !course) {
-    return (
-      <AppLayout>
-        <div className="px-4 pt-10">
-          <CourseSelector onSelect={(id) => setCourseId(id)} currentCourseId={courseId || undefined} />
-        </div>
-      </AppLayout>
-    );
+  if (!isAdmin && (!courseId || !course)) {
+    if (!isLoadingCourses) {
+       return (
+         <AppLayout>
+           <div className="p-8 text-center text-muted-foreground mt-10">
+              Nenhum curso preparatório vinculado à sua conta. Entre em contato com nossa equipe para assistência.
+           </div>
+         </AppLayout>
+       );
+    }
+    return null;
   }
 
   return (
@@ -50,7 +54,7 @@ export default function HomePage() {
           <h1 className="text-2xl font-bold text-foreground">Olá, {user?.name ?? "Recruta"}! 🎯</h1>
           <div className="flex items-center gap-1.5 mt-0.5">
             <GraduationCap className="h-3.5 w-3.5 text-primary" />
-            <p className="text-sm text-primary font-medium">{course.name}</p>
+            <p className="text-sm text-primary font-medium">{course?.name ?? (isAdmin ? "Administrador" : "Sem Curso")}</p>
             <span className="text-sm text-muted-foreground">— Continue firme.</span>
           </div>
         </div>
@@ -85,27 +89,32 @@ export default function HomePage() {
             </div>
           </div>
           <div className="rounded-2xl bg-gradient-to-br from-xp/20 to-xp/5 border border-xp/20 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Patente</p>
-                <p className="text-lg font-bold text-foreground">{stats.rank}</p>
-              </div>
-              <div className="flex items-center gap-1.5 rounded-full bg-xp/20 px-3 py-1">
-                <Zap className="h-4 w-4 text-xp" />
-                <span className="text-sm font-bold text-xp">{stats.xp} XP</span>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium text-muted-foreground">Patente</p>
+              <div className="flex items-center gap-1 bg-xp/20 px-2 py-0.5 rounded-full">
+                <Zap className="h-3 w-3 text-xp" />
+                <span className="text-xs font-bold text-xp">{stats.xp} XP</span>
               </div>
             </div>
+            <p className="text-lg font-bold text-foreground mb-2">{stats.rank}</p>
             {(() => {
               const currentRank = ranks.find((r) => r.level === stats.level) ?? ranks[0];
               const nextRank = ranks.find((r) => r.level === stats.level + 1);
               if (!nextRank) return null;
               const xpProgress = ((stats.xp - currentRank.xpRequired) / (nextRank.xpRequired - currentRank.xpRequired)) * 100;
+              const xpToGo = nextRank.xpRequired - stats.xp;
               return (
                 <div>
                   <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                    <span>{currentRank.name}</span><span>{nextRank.name}</span>
+                    <span>{currentRank.name}</span>
+                    <span>{nextRank.name}</span>
                   </div>
-                  <Progress value={xpProgress} className="h-2 bg-muted [&>div]:bg-xp" />
+                  <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+                    <div className="absolute inset-0 bg-xp rounded-full transition-all" style={{ width: `${xpProgress}%` }} />
+                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-white drop-shadow-sm">
+                      {xpToGo} XP
+                    </span>
+                  </div>
                 </div>
               );
             })()}

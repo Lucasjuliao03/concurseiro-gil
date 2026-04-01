@@ -1,6 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { Subject, Question, Flashcard } from '@/types/study';
+import { toast } from 'sonner';
+import { ACHIEVEMENTS } from '@/types/achievements';
+import { useNotificationContext } from '@/contexts/NotificationContext';
 
 /* ═══════════════════════════════════════════════════════ */
 /*  ICON MAP (UI only — not stored in DB)                 */
@@ -18,13 +21,37 @@ const DEFAULT_UI = { icon: "📖", color: "hsl(217 91% 60%)" };
 /* ═══════════════════════════════════════════════════════ */
 /*  SUBJECTS                                              */
 /* ═══════════════════════════════════════════════════════ */
-export function useSubjects() {
+export function useSubjects(courseId?: string | null) {
   return useQuery({
-    queryKey: ['subjects'],
+    queryKey: ['subjects', courseId],
     queryFn: async () => {
-      const { data, error } = await supabase.from('subjects').select('*').order('name');
+      // Se courseId for explicitamente null, o usuário não tem curso, então não mostramos nenhuma matéria estudantil.
+      if (courseId === null) return [];
+
+      let { data, error } = await supabase.from('subjects').select('*').order('name');
       if (error) throw error;
-      return (data || []).map((s: any): Subject => {
+      let allSubjects = data || [];
+
+      if (courseId) {
+         // Query active edicts for this course
+         const { data: edicts } = await supabase.from('edicts').select('id').eq('course_id', parseInt(courseId)).eq('is_active', true);
+         const edictIds = (edicts || []).map(e => e.id);
+         
+         if (edictIds.length > 0) {
+            // Query subjects linked to these edicts
+            const { data: edictSubs } = await supabase.from('edict_subjects').select('subject_id').in('edict_id', edictIds);
+            if (edictSubs && edictSubs.length > 0) {
+               const subjectIds = Array.from(new Set(edictSubs.map(es => es.subject_id)));
+               allSubjects = allSubjects.filter(sub => subjectIds.includes(parseInt(sub.id)));
+            } else {
+               allSubjects = [];
+            }
+         } else {
+            allSubjects = [];
+         }
+      }
+
+      return allSubjects.map((s: any): Subject => {
         // Fallback or exact match
         const ui = Object.entries(SUBJECT_UI_MAP).find(([key]) => s.name.includes(key))?.[1] || DEFAULT_UI;
         return { id: String(s.id), name: s.name, icon: ui.icon, color: ui.color, questionCount: 0 };
@@ -197,6 +224,8 @@ export function useCourses() {
 /* ═══════════════════════════════════════════════════════ */
 export function useRecordAnswer() {
   const qc = useQueryClient();
+  const notifications = useNotificationContext();
+  
   return useMutation({
     mutationFn: async (vars: { userId: string; questionId: number; selectedOption: string; isCorrect: boolean }) => {
       // 1. Insert attempt
@@ -298,23 +327,135 @@ export function useRecordAnswer() {
               newStreak = profile.streak_days || 1;
             }
           }
-          await supabase.from('profiles').update({ 
-            streak_days: newStreak, 
-            last_access_at: new Date().toISOString() 
-          }).eq('id', vars.userId);
+        await supabase.from('profiles').update({ 
+          streak_days: newStreak, 
+          last_access_at: new Date().toISOString() 
+        }).eq('id', vars.userId);
         }
+      }
+
+      // Check achievements
+      console.log('[useRecordAnswer] Verificando conquistas...');
+      try {
+        // Buscar conquistas já desbloqueadas
+        const { data: existingData, error: fetchErr } = await supabase
+          .from('user_achievements')
+          .select('achievement_id')
+          .eq('user_id', vars.userId);
+
+        if (fetchErr) {
+          console.error('[useRecordAnswer] Erro ao buscar conquistas:', fetchErr);
+        } else {
+          const unlockedIds = new Set(existingData?.map((a: any) => a.achievement_id) || []);
+          console.log('[useRecordAnswer] IDs desbloqueados:', Array.from(unlockedIds));
+
+          // Buscar stats
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('xp_total, streak_days')
+            .eq('id', vars.userId)
+            .single();
+
+          const { data: qStats } = await supabase
+            .from('user_question_stats')
+            .select('total_attempts, total_correct')
+            .eq('user_id', vars.userId);
+
+          const totalAnswered = qStats?.reduce((sum: number, s: any) => sum + (s.total_attempts || 0), 0) || 0;
+          const totalCorrect = qStats?.reduce((sum: number, s: any) => sum + (s.total_correct || 0), 0) || 0;
+
+          // Importar conquistas localmente para evitar dependência circular
+          // ACHIEVEMENTS já está importado no topo do arquivo
+
+          const unlocked: any[] = [];
+
+          for (const achievement of ACHIEVEMENTS) {
+            if (unlockedIds.has(achievement.id) || achievement.isSecret) continue;
+
+            let isUnlocked = false;
+
+            switch (achievement.category) {
+              case 'questions':
+                isUnlocked = totalAnswered >= achievement.requirement;
+                break;
+              case 'streak':
+                isUnlocked = (profileData?.streak_days || 0) >= achievement.requirement;
+                break;
+              case 'xp':
+                isUnlocked = (profileData?.xp_total || 0) >= achievement.requirement;
+                break;
+              case 'accuracy':
+                isUnlocked = totalCorrect >= achievement.requirement;
+                break;
+            }
+
+            if (isUnlocked) {
+              console.log(`[useRecordAnswer] ✅ Conquista: ${achievement.name}`);
+              unlocked.push(achievement);
+
+              // Inserir no banco
+              await supabase.from('user_achievements').insert({
+                user_id: vars.userId,
+                achievement_id: achievement.id,
+                unlocked_at: new Date().toISOString(),
+                notification_shown: false,
+              });
+
+              // Adicionar XP
+              if (achievement.xpReward > 0) {
+                const { error: rpcErr } = await supabase.rpc('increment_xp', {
+                  user_id_arg: vars.userId,
+                  xp_arg: achievement.xpReward,
+                });
+                if (rpcErr) {
+                  const { data: prof } = await supabase.from('profiles').select('xp_total').eq('id', vars.userId).single();
+                  if (prof) {
+                    await supabase.from('profiles').update({ xp_total: (prof.xp_total || 0) + achievement.xpReward }).eq('id', vars.userId);
+                  }
+                }
+              }
+            }
+          }
+
+          // Mostrar toast
+          if (unlocked.length > 0) {
+            if (unlocked.length === 1) {
+              const a = unlocked[0];
+              toast.success(`🏆 Conquista Desbloqueada!`, {
+                description: `${a.icon} ${a.name}\n${a.description}`,
+                duration: 6000,
+              });
+            } else {
+              toast.success(`🎉 ${unlocked.length} Conquistas Desbloqueadas!`, {
+                description: unlocked.map((a) => `${a.icon} ${a.name}`).join(' • '),
+                duration: 6000,
+              });
+            }
+          }
+        }
+        
+        // Marcar como estudado e verificar streak
+        notifications.markAsStudied();
+        
+        // Verificar e notificar streak
+        notifications.checkAndNotify(vars.userId);
+      } catch (e) {
+        console.error('[useRecordAnswer] Erro geral nas conquistas:', e);
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['userProfile'] });
       qc.invalidateQueries({ queryKey: ['userProductivity'] });
       qc.invalidateQueries({ queryKey: ['userQuestionStats'] });
+      qc.invalidateQueries({ queryKey: ['userAchievements'] });
     },
   });
 }
 
 export function useRecordFlashcardReview() {
   const qc = useQueryClient();
+  const notifications = useNotificationContext();
+  
   return useMutation({
     mutationFn: async (vars: { userId: string; flashcardId: number; result: 'wrong' | 'hard' | 'good' | 'easy' }) => {
       const intervalMap = { wrong: 1, hard: 2, good: 4, easy: 7 };
@@ -419,11 +560,108 @@ export function useRecordFlashcardReview() {
           }).eq('id', vars.userId);
         }
       }
+
+      // Check achievements for flashcards
+      console.log('[useRecordFlashcardReview] Verificando conquistas...');
+      try {
+        const { data: existingData, error: fetchErr } = await supabase
+          .from('user_achievements')
+          .select('achievement_id')
+          .eq('user_id', vars.userId);
+
+        if (fetchErr) {
+          console.error('[useRecordFlashcardReview] Erro ao buscar conquistas:', fetchErr);
+        } else {
+          const unlockedIds = new Set(existingData?.map((a: any) => a.achievement_id) || []);
+
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('xp_total, streak_days')
+            .eq('id', vars.userId)
+            .single();
+
+          const { data: allFlashcards } = await supabase
+            .from('user_flashcard_reviews')
+            .select('total_reviews')
+            .eq('user_id', vars.userId);
+
+          const totalFlashcards = allFlashcards?.reduce((sum: number, s: any) => sum + (s.total_reviews || 0), 0) || 0;
+
+          // ACHIEVEMENTS já está importado no topo do arquivo
+
+          const unlocked: any[] = [];
+
+          for (const achievement of ACHIEVEMENTS) {
+            if (unlockedIds.has(achievement.id) || achievement.isSecret) continue;
+
+            let isUnlocked = false;
+
+            switch (achievement.category) {
+              case 'flashcards':
+                isUnlocked = totalFlashcards >= achievement.requirement;
+                break;
+              case 'streak':
+                isUnlocked = (profileData?.streak_days || 0) >= achievement.requirement;
+                break;
+              case 'xp':
+                isUnlocked = (profileData?.xp_total || 0) >= achievement.requirement;
+                break;
+            }
+
+            if (isUnlocked) {
+              console.log(`[useRecordFlashcardReview] ✅ Conquista: ${achievement.name}`);
+              unlocked.push(achievement);
+
+              await supabase.from('user_achievements').insert({
+                user_id: vars.userId,
+                achievement_id: achievement.id,
+                unlocked_at: new Date().toISOString(),
+                notification_shown: false,
+              });
+
+              if (achievement.xpReward > 0) {
+                const { error: rpcErr } = await supabase.rpc('increment_xp', {
+                  user_id_arg: vars.userId,
+                  xp_arg: achievement.xpReward,
+                });
+                if (rpcErr) {
+                  const { data: prof } = await supabase.from('profiles').select('xp_total').eq('id', vars.userId).single();
+                  if (prof) {
+                    await supabase.from('profiles').update({ xp_total: (prof.xp_total || 0) + achievement.xpReward }).eq('id', vars.userId);
+                  }
+                }
+              }
+            }
+          }
+
+          if (unlocked.length > 0) {
+            if (unlocked.length === 1) {
+              const a = unlocked[0];
+              toast.success(`🏆 Conquista Desbloqueada!`, {
+                description: `${a.icon} ${a.name}\n${a.description}`,
+                duration: 6000,
+              });
+            } else {
+              toast.success(`🎉 ${unlocked.length} Conquistas Desbloqueadas!`, {
+                description: unlocked.map((a) => `${a.icon} ${a.name}`).join(' • '),
+                duration: 6000,
+              });
+            }
+          }
+          
+          // Marcar como estudado e verificar streak
+          notifications.markAsStudied();
+          notifications.checkAndNotify(vars.userId);
+        }
+      } catch (e) {
+        console.error('[useRecordFlashcardReview] Erro geral nas conquistas:', e);
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['userProfile'] });
       qc.invalidateQueries({ queryKey: ['userProductivity'] });
       qc.invalidateQueries({ queryKey: ['flashcards'] });
+      qc.invalidateQueries({ queryKey: ['userAchievements'] });
     },
   });
 }

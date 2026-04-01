@@ -10,16 +10,29 @@ export async function fetchProfile(userId: string): Promise<User | null> {
 
   if (error || !data) return null;
 
-  // Since Supabase trigger assigns full_name from raw_user_meta_data,
-  // we use it. We may not have email natively in the profile.
+  let courseId = data.course_id;
+
+  // Se course_id está vazio no perfil, tenta pegar do user_metadata e salvar
+  if (!courseId) {
+    const { data: authData } = await supabase.auth.getUser();
+    const metaCourseId = authData?.user?.user_metadata?.course_id;
+    if (metaCourseId) {
+      courseId = parseInt(String(metaCourseId));
+      // Tenta salvar no perfil (pode falhar por RLS, mas tenta)
+      await supabase.from("profiles").update({ course_id: courseId }).eq("id", userId);
+    }
+  }
+
   return {
     id: data.id,
     name: data.full_name,
-    email: data.username || "user@example.com", // username or email mapping
+    email: data.username || "user@example.com",
     role: data.role as UserRole,
     isApproved: data.is_active,
     createdAt: data.created_at,
-    passwordHash: "", // Redacted for security
+    courseId: courseId,
+    activeUntil: data.active_until,
+    passwordHash: "",
   };
 }
 
@@ -58,7 +71,8 @@ export async function login(
 export async function register(
   name: string,
   email: string,
-  password: string
+  password: string,
+  courseId?: number
 ): Promise<{ success: boolean; error?: string; user?: User }> {
   if (password.length < 6) {
     return { success: false, error: "A senha deve ter no mínimo 6 caracteres." };
@@ -70,6 +84,7 @@ export async function register(
     options: {
       data: {
         full_name: name,
+        course_id: courseId,
       },
     },
   });
@@ -84,8 +99,12 @@ export async function register(
     return { success: false, error: msg };
   }
 
-  // Se o Supabase exigir confirmação de e-mail, a session virá nula.
-  // Nesse caso, o usuário não está logado ainda.
+  // Tenta salvar course_id no perfil (pode falhar por RLS se não há sessão)
+  if (data.user && courseId) {
+    await new Promise(r => setTimeout(r, 1000));
+    await supabase.from("profiles").update({ course_id: courseId }).eq("id", data.user.id);
+  }
+
   if (!data.session) {
     return { success: false, error: "Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar." };
   }
@@ -113,14 +132,25 @@ export async function getAllUsers(): Promise<User[]> {
     role: d.role as UserRole,
     isApproved: d.is_active,
     createdAt: d.created_at,
+    courseId: d.course_id,
+    activeUntil: d.active_until,
     passwordHash: "",
   }));
 }
 
-export async function approveUser(userId: string): Promise<void> {
-  await supabase.from("profiles").update({ is_active: true }).eq("id", userId);
+export async function approveUser(userId: string, activeUntil?: string | null): Promise<void> {
+  const payload: any = { is_active: true };
+  if (activeUntil !== undefined) {
+    payload.active_until = activeUntil;
+  }
+  await supabase.from("profiles").update(payload).eq("id", userId);
 }
 
 export async function blockUser(userId: string): Promise<void> {
   await supabase.from("profiles").update({ is_active: false }).eq("id", userId);
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  // Remove o perfil do banco (cascade vai limpar dados vinculados)
+  await supabase.from("profiles").delete().eq("id", userId);
 }

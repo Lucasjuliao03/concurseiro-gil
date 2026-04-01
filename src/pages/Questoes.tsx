@@ -5,8 +5,7 @@ import { CheckCircle2, XCircle, ChevronRight, Filter, BookOpen } from "lucide-re
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { canAnswer, getRemainingFreeQuestions } from "@/services/accessService";
-import { getUserCourseId } from "@/services/courseService";
+import { canAccessContent, isUserActive } from "@/services/accessService";
 import { useSubjects, useQuestions, useRecordAnswer, useUserProductivity, useTopics, useUserQuestionStats } from "@/hooks/useStudyData";
 import { useMemo } from "react";
 import { BlockedOverlay } from "@/components/BlockedOverlay";
@@ -119,8 +118,9 @@ function QuestionCard({ question, subjectName, subjectIcon, onNext, onAnswer }: 
 }
 
 export default function QuestoesPage() {
-  const { user, isApproved } = useAuth();
-  const { data: subjects = [], isLoading: loadingSub } = useSubjects();
+  const { user, isApproved, isAdmin } = useAuth();
+  const courseId = user?.courseId ? String(user.courseId) : null;
+  const { data: subjects = [], isLoading: loadingSub } = useSubjects(isAdmin ? undefined : courseId);
   const { data: topics = [], isLoading: loadingTop } = useTopics();
   const { data: questions = [], isLoading: loadingQ } = useQuestions();
   const { data: todayProd } = useUserProductivity(user?.id);
@@ -134,9 +134,7 @@ export default function QuestoesPage() {
   const [sessionQueue, setSessionQueue] = useState<typeof questions>([]);
   const [isFinished, setIsFinished] = useState(false);
 
-  // We are not strictly filtering subjects by `course.subjectIds` anymore since courses are dynamic and might not have mapped edicts yet.
-  // Instead, we just require the user to have a course selected in Index, but here we can show all active subjects.
-  const courseId = user ? getUserCourseId(user.id) : null;
+  // Subjects are now strictly filtered via the hook based on courseId.
   const filteredSubjects = subjects;
   
   // Filter questions by source if one is selected
@@ -186,7 +184,10 @@ export default function QuestoesPage() {
   };
 
   const answeredCount = todayProd?.questions_answered ?? 0;
-  const hasAccess = canAnswer(user);
+  const flashcardsCount = todayProd?.flashcards_reviewed ?? 0;
+  const totalUsage = answeredCount + flashcardsCount;
+  const active = isUserActive(user);
+  const limitReached = !canAccessContent(user, totalUsage);
 
   const handleAnswer = (isCorrect: boolean, selectedOption: string) => {
     if (user && sessionQueue[currentIndex]) {
@@ -207,8 +208,23 @@ export default function QuestoesPage() {
     }
   };
 
-  if (!hasAccess && !isApproved) {
-    return <AppLayout><BlockedOverlay answeredCount={answeredCount} /></AppLayout>;
+  if (!active) {
+    return <AppLayout><BlockedOverlay reason="expired" /></AppLayout>;
+  }
+  
+  if (limitReached && !isApproved) {
+    return <AppLayout><BlockedOverlay answeredCount={totalUsage} reason="limit_reached" /></AppLayout>;
+  }
+
+  if (!isAdmin && !courseId) {
+    return (
+      <AppLayout>
+        <div className="p-8 text-center mt-10 animate-fade-in">
+          <h2 className="text-xl font-bold text-foreground mb-2">Acesso Restrito</h2>
+          <p className="text-muted-foreground text-sm">Você precisa ter um curso vinculado à sua conta para acessar as questões. Entre em contato com a equipe.</p>
+        </div>
+      </AppLayout>
+    );
   }
 
   if (loadingQ || loadingSub || loadingTop || loadingStats) {

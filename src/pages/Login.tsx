@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { BookOpen, Lock, Mail, User, Eye, EyeOff, ChevronRight } from "lucide-react";
+import { BookOpen, Lock, Mail, User, Eye, EyeOff, ChevronRight, GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCourses } from "@/hooks/useStudyData";
 
 export default function LoginPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -12,8 +13,10 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedCourse, setSelectedCourse] = useState("");
 
   const { login, register, isAuthenticated, loading } = useAuth();
+  const { data: courses = [] } = useCourses();
   const navigate = useNavigate();
 
   // If already logged in, redirect away
@@ -34,7 +37,8 @@ export default function LoginPage() {
       let result;
       if (isRegister) {
         if (!name.trim()) { setError("Informe seu nome."); setIsSubmitting(false); return; }
-        result = await register(name.trim(), email.trim(), password);
+        if (!selectedCourse) { setError("Escolha um curso preparatório."); setIsSubmitting(false); return; }
+        result = await register(name.trim(), email.trim(), password, parseInt(selectedCourse));
       } else {
         result = await login(email.trim(), password);
       }
@@ -90,19 +94,38 @@ export default function LoginPage() {
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {isRegister && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Nome completo</label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Seu nome"
-                  className="w-full rounded-xl border border-border bg-card pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
-                />
+            <>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Nome completo</label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Seu nome"
+                    className="w-full rounded-xl border border-border bg-card pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
+                  />
+                </div>
               </div>
-            </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Curso Preparatório</label>
+                <div className="relative">
+                  <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <select
+                    value={selectedCourse}
+                    onChange={(e) => setSelectedCourse(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-card pl-10 pr-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all appearance-none"
+                  >
+                    <option value="" disabled>Selecione seu curso...</option>
+                    {courses.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </>
           )}
 
           <div className="space-y-1.5">
