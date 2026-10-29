@@ -22,8 +22,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const notifications = useNotifications();
 
   useEffect(() => {
-    initNotificationListeners(notifications);
-  }, [notifications]);
+    return initNotificationListeners(notifications.sendDailyReminder);
+  }, [notifications.sendDailyReminder]);
 
   return (
     <NotificationContext.Provider value={notifications}>

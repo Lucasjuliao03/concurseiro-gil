@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState("");
 
@@ -31,6 +32,7 @@ export default function LoginPage() {
     if (isSubmitting) return;
     
     setError("");
+    setNotice("");
     setIsSubmitting(true);
 
     try {
@@ -43,7 +45,11 @@ export default function LoginPage() {
         result = await login(email.trim(), password);
       }
 
-      if (result.success) {
+      if (result.success && "requiresEmailConfirmation" in result && result.requiresEmailConfirmation) {
+        setNotice("Cadastro realizado! Confirme seu e-mail antes de entrar.");
+        setIsRegister(false);
+        setPassword("");
+      } else if (result.success) {
         navigate("/", { replace: true });
       } else {
         setError(result.error || "Erro ao processar. Tente novamente.");
@@ -56,7 +62,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="dark min-h-screen bg-background flex flex-col items-center justify-center px-6">
+    <main className="dark min-h-screen bg-background flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm space-y-8 animate-slide-up">
         {/* Logo */}
         <div className="text-center space-y-3">
@@ -72,6 +78,7 @@ export default function LoginPage() {
         {/* Toggle */}
         <div className="flex rounded-xl bg-muted p-1">
           <button
+            type="button"
             onClick={() => { setIsRegister(false); setError(""); }}
             className={cn(
               "flex-1 rounded-lg py-2.5 text-sm font-semibold transition-all",
@@ -81,6 +88,7 @@ export default function LoginPage() {
             Entrar
           </button>
           <button
+            type="button"
             onClick={() => { setIsRegister(true); setError(""); }}
             className={cn(
               "flex-1 rounded-lg py-2.5 text-sm font-semibold transition-all",
@@ -93,14 +101,22 @@ export default function LoginPage() {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {notice && (
+            <div role="status" className="rounded-xl border border-success/30 bg-success/10 p-3 text-sm text-success">
+              {notice}
+            </div>
+          )}
           {isRegister && (
             <>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Nome completo</label>
+                <label htmlFor="name" className="text-xs font-medium text-muted-foreground">Nome completo</label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <input
+                    id="name"
+                    name="name"
                     type="text"
+                    autoComplete="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Seu nome"
@@ -110,10 +126,12 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Curso Preparatório</label>
+                <label htmlFor="course" className="text-xs font-medium text-muted-foreground">Curso Preparatório</label>
                 <div className="relative">
                   <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <select
+                    id="course"
+                    name="course"
                     value={selectedCourse}
                     onChange={(e) => setSelectedCourse(e.target.value)}
                     className="w-full rounded-xl border border-border bg-card pl-10 pr-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all appearance-none"
@@ -129,11 +147,14 @@ export default function LoginPage() {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Email</label>
+            <label htmlFor="email" className="text-xs font-medium text-muted-foreground">Email</label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
+                id="email"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="seu@email.com"
@@ -144,11 +165,14 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Senha</label>
+            <label htmlFor="password" className="text-xs font-medium text-muted-foreground">Senha</label>
             <div className="relative">
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
+                id="password"
+                name="password"
                 type={showPassword ? "text" : "password"}
+                autoComplete={isRegister ? "new-password" : "current-password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••"
@@ -157,6 +181,8 @@ export default function LoginPage() {
               />
               <button
                 type="button"
+                aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                aria-pressed={showPassword}
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -166,7 +192,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="rounded-xl bg-destructive/10 border border-destructive/30 px-4 py-2.5">
+            <div role="alert" className="rounded-xl bg-destructive/10 border border-destructive/30 px-4 py-2.5">
               <p className="text-xs text-destructive font-medium">{error}</p>
             </div>
           )}
@@ -199,6 +225,6 @@ export default function LoginPage() {
           </p>
         )}
       </div>
-    </div>
+    </main>
   );
 }

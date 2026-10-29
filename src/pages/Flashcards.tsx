@@ -6,23 +6,24 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { canAccessContent, isUserActive } from "@/services/accessService";
 import { Flashcard } from "@/types/study";
-import { useSubjects, useFlashcards, useRecordFlashcardReview, useUserProductivity, useTopics, useUserFlashcardReviews } from "@/hooks/useStudyData";
-import { useMemo } from "react";
+import { useSubjects, useFlashcards, useRecordFlashcardReview, useStudyUsage, useTopics, useUserFlashcardReviews } from "@/hooks/useStudyData";
 import { BlockedOverlay } from "@/components/BlockedOverlay";
+import { StudyEmptyState } from "@/components/StudyEmptyState";
 
-function FlashcardViewer({ card, onRate }: {
+function FlashcardViewer({ card, subjectName, subjectIcon, onRate, isSaving }: {
   card: Flashcard;
-  onRate: (rating: "wrong" | "hard" | "good" | "easy") => void;
+  subjectName: string;
+  subjectIcon: string;
+  onRate: (rating: "wrong" | "hard" | "good" | "easy") => Promise<void>;
+  isSaving: boolean;
 }) {
   const [flipped, setFlipped] = useState(false);
-  const { data: subjects = [] } = useSubjects();
-  const subject = subjects.find((s) => s.id === card.subjectId);
 
   return (
     <div className="space-y-4 animate-slide-up">
       <div className="flex items-center gap-2">
         <Badge variant="outline" className="text-xs border-primary/30 text-primary">
-          {subject?.icon ?? "📖"} {subject?.name ?? "Geral"}
+          {subjectIcon} {subjectName}
         </Badge>
         <Badge variant="outline" className="text-xs border-border text-muted-foreground">
           {card.topic}
@@ -51,19 +52,19 @@ function FlashcardViewer({ card, onRate }: {
         <div className="space-y-2 animate-slide-up">
           <p className="text-xs text-center text-muted-foreground">Como foi?</p>
           <div className="grid grid-cols-4 gap-2">
-            <button onClick={() => onRate("wrong")} className="flex flex-col items-center gap-1.5 rounded-xl bg-destructive/10 border border-destructive/20 py-3 active:scale-[0.95] transition-all">
+            <button disabled={isSaving} onClick={() => void onRate("wrong")} className="flex flex-col items-center gap-1.5 rounded-xl bg-destructive/10 border border-destructive/20 py-3 active:scale-[0.95] transition-all disabled:opacity-50">
               <X className="h-5 w-5 text-destructive" />
               <span className="text-xs font-medium text-destructive">Errei</span>
             </button>
-            <button onClick={() => onRate("hard")} className="flex flex-col items-center gap-1.5 rounded-xl bg-warning/10 border border-warning/20 py-3 active:scale-[0.95] transition-all">
+            <button disabled={isSaving} onClick={() => void onRate("hard")} className="flex flex-col items-center gap-1.5 rounded-xl bg-warning/10 border border-warning/20 py-3 active:scale-[0.95] transition-all disabled:opacity-50">
               <HelpCircle className="h-5 w-5 text-warning" />
               <span className="text-xs font-medium text-warning">Difícil</span>
             </button>
-            <button onClick={() => onRate("good")} className="flex flex-col items-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 py-3 active:scale-[0.95] transition-all">
+            <button disabled={isSaving} onClick={() => void onRate("good")} className="flex flex-col items-center gap-1.5 rounded-xl bg-primary/10 border border-primary/20 py-3 active:scale-[0.95] transition-all disabled:opacity-50">
               <Check className="h-5 w-5 text-primary" />
               <span className="text-xs font-medium text-primary">Bom</span>
             </button>
-            <button onClick={() => onRate("easy")} className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 border border-success/20 py-3 active:scale-[0.95] transition-all">
+            <button disabled={isSaving} onClick={() => void onRate("easy")} className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 border border-success/20 py-3 active:scale-[0.95] transition-all disabled:opacity-50">
               <Check className="h-5 w-5 text-success" />
               <span className="text-xs font-medium text-success">Fácil</span>
             </button>
@@ -83,10 +84,10 @@ export default function FlashcardsPage() {
   const { user, isApproved, isAdmin } = useAuth();
   const courseId = user?.courseId ? String(user.courseId) : null;
   const { data: subjects = [], isLoading: loadingSub } = useSubjects(isAdmin ? undefined : courseId);
-  const { data: topics = [], isLoading: loadingTop } = useTopics();
-  const { data: flashcards = [], isLoading: loadingF } = useFlashcards();
+  const { data: topics = [], isLoading: loadingTop } = useTopics(isAdmin ? undefined : courseId);
+  const { data: flashcards = [], isLoading: loadingF } = useFlashcards(isAdmin ? undefined : courseId);
   const { data: userReviews = [], isLoading: loadingStats } = useUserFlashcardReviews(user?.id);
-  const { data: todayProd } = useUserProductivity(user?.id);
+  const { data: usage, isLoading: loadingUsage } = useStudyUsage(user?.id);
   
   const recordReview = useRecordFlashcardReview();
 
@@ -106,9 +107,10 @@ export default function FlashcardsPage() {
     setCurrentIndex(0);
     setIsFinished(false);
 
-    const topicCards = flashcards.filter(f => 
-      topicId === "general" ? f.subjectId === selectedSubjectId : 
-      f.topicId === topicId || f.subjectId === selectedSubjectId && !f.topicId
+    const topicCards = flashcards.filter((card) =>
+      topicId === "general"
+        ? card.subjectId === selectedSubjectId
+        : card.subjectId === selectedSubjectId && card.topicId === topicId
     );
 
     const sorted = [...topicCards].sort((a, b) => {
@@ -137,9 +139,7 @@ export default function FlashcardsPage() {
     setSessionQueue(sorted);
   };
 
-  const answeredCount = todayProd?.questions_answered ?? 0;
-  const flashcardsCount = todayProd?.flashcards_reviewed ?? 0;
-  const totalUsage = answeredCount + flashcardsCount;
+  const totalUsage = usage?.content ?? 0;
   const active = isUserActive(user);
   const limitReached = !canAccessContent(user, totalUsage);
 
@@ -162,8 +162,12 @@ export default function FlashcardsPage() {
     );
   }
 
-  if (loadingF || loadingSub || loadingTop || loadingStats) {
+  if (loadingF || loadingSub || loadingTop || loadingStats || loadingUsage) {
     return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando flashcards...</div></AppLayout>;
+  }
+
+  if (filteredSubjects.length === 0) {
+    return <AppLayout><StudyEmptyState title="Nenhum flashcard publicado" description="Não há flashcards publicados nas matérias vinculadas ao edital deste curso." /></AppLayout>;
   }
 
   // --- SELECTION SCREENS ---
@@ -206,7 +210,9 @@ export default function FlashcardsPage() {
           </div>
           <div className="space-y-3">
             {filteredTopics.map(topic => {
-              const count = flashcards.filter(f => f.topicId === String(topic.id) || f.subjectId === selectedSubjectId && !f.topicId).length;
+              const count = flashcards.filter((card) =>
+                card.subjectId === selectedSubjectId && card.topicId === String(topic.id)
+              ).length;
               return (
                 <button key={topic.id} onClick={() => startSession(String(topic.id))} disabled={count === 0}
                   className="w-full p-4 rounded-xl bg-card border border-border text-left flex justify-between items-center hover:border-primary/50 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
@@ -270,13 +276,13 @@ export default function FlashcardsPage() {
     );
   }
 
-  const handleRate = (rating: "wrong" | "hard" | "good" | "easy") => {
-    if (user && sessionQueue[currentIndex]) {
-      recordReview.mutate({
-        userId: user.id,
-        flashcardId: parseInt(sessionQueue[currentIndex].id),
-        result: rating,
-      });
+  const handleRate = async (rating: "wrong" | "hard" | "good" | "easy") => {
+    const currentCard = sessionQueue[currentIndex];
+    if (!currentCard) return;
+    try {
+      await recordReview.mutateAsync({ flashcardId: Number(currentCard.id), result: rating });
+    } catch {
+      return;
     }
 
     if (currentIndex + 1 >= sessionQueue.length) {
@@ -287,6 +293,7 @@ export default function FlashcardsPage() {
   };
 
   const currentFlashcard = sessionQueue[currentIndex];
+  const currentSubject = subjects.find((subject) => subject.id === currentFlashcard.subjectId);
 
   return (
     <AppLayout>
@@ -309,7 +316,10 @@ export default function FlashcardsPage() {
         <FlashcardViewer
           key={currentFlashcard.id}
           card={currentFlashcard}
+          subjectName={currentSubject?.name ?? "Geral"}
+          subjectIcon={currentSubject?.icon ?? "📖"}
           onRate={handleRate}
+          isSaving={recordReview.isPending}
         />
       </div>
     </AppLayout>

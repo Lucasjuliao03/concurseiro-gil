@@ -1,31 +1,49 @@
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ProtectedRoute, AdminRoute } from "@/components/ProtectedRoute";
 import { useServiceWorker } from "@/hooks/useServiceWorker";
-import Index from "./pages/Index";
-import Questoes from "./pages/Questoes";
-import Flashcards from "./pages/Flashcards";
-import Resumos from "./pages/Resumos";
-import Perfil from "./pages/Perfil";
-import Login from "./pages/Login";
-import Admin from "./pages/Admin";
-import NotFound from "./pages/NotFound";
-import Achievements from "./pages/Achievements";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
+import { studyDataErrorMessage } from "@/lib/supabaseErrors";
+const Index = lazy(() => import("./pages/Index"));
+const Questoes = lazy(() => import("./pages/Questoes"));
+const Flashcards = lazy(() => import("./pages/Flashcards"));
+const Resumos = lazy(() => import("./pages/Resumos"));
+const Perfil = lazy(() => import("./pages/Perfil"));
+const Login = lazy(() => import("./pages/Login"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const Achievements = lazy(() => import("./pages/Achievements"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
+const AdminStructure = lazy(() => import("./pages/admin/AdminStructure"));
+const AdminQuestions = lazy(() => import("./pages/admin/AdminQuestions"));
+const AdminContent = lazy(() => import("./pages/admin/AdminContent"));
+const AdminMessages = lazy(() => import("./pages/admin/AdminMessages"));
 
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import AdminUsers from "./pages/admin/AdminUsers";
-import AdminStructure from "./pages/admin/AdminStructure";
-import AdminQuestions from "./pages/admin/AdminQuestions";
-import AdminContent from "./pages/admin/AdminContent";
-import AdminMessages from "./pages/admin/AdminMessages";
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => toast.error(studyDataErrorMessage(error)),
+  }),
+  defaultOptions: {
+    queries: { retry: 1, refetchOnWindowFocus: false },
+    mutations: {
+      retry: 0,
+      onError: () => toast.error("A operação não pôde ser concluída. Tente novamente."),
+    },
+  },
+});
 
-const queryClient = new QueryClient();
+const RouteFallback = () => (
+  <div className="dark min-h-screen bg-background flex items-center justify-center" role="status" aria-label="Carregando página">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+  </div>
+);
 
 // Intro Video Screen Overlay
 const IntroScreen = ({ onFinish }: { onFinish: () => void }) => {
@@ -40,6 +58,8 @@ const IntroScreen = ({ onFinish }: { onFinish: () => void }) => {
         muted 
         playsInline 
         onEnded={onFinish}
+        onError={onFinish}
+        poster="/app.png"
         className="w-full h-full max-h-[90vh] object-contain animate-fade-in"
       />
       <div className="absolute bottom-6 left-0 w-full text-center text-white/50 text-xs font-mono tracking-widest uppercase font-semibold">
@@ -54,14 +74,14 @@ const AppRoutes = () => {
 
   useEffect(() => {
     // Only show intro once per browser session. Opening the PWA fresh starts a new session.
-    const hasSeenIntro = sessionStorage.getItem("hasSeenIntro");
+    const hasSeenIntro = localStorage.getItem("safo_intro_v1");
     if (hasSeenIntro) {
       setIntroFinished(true);
     }
   }, []);
 
   const handleFinishIntro = () => {
-    sessionStorage.setItem("hasSeenIntro", "true");
+    localStorage.setItem("safo_intro_v1", "true");
     setIntroFinished(true);
   };
 
@@ -69,6 +89,7 @@ const AppRoutes = () => {
     <>
       {!introFinished && <IntroScreen onFinish={handleFinishIntro} />}
       <div className={introFinished ? "block" : "hidden h-0 overflow-hidden"}>
+        <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
@@ -78,7 +99,7 @@ const AppRoutes = () => {
           <Route path="/perfil" element={<ProtectedRoute><Perfil /></ProtectedRoute>} />
           <Route path="/medalhas" element={<ProtectedRoute><Achievements /></ProtectedRoute>} />
           
-          <Route path="/admin" element={<ProtectedRoute><AdminRoute><Admin /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin" element={<ProtectedRoute><AdminRoute><Navigate to="/painel" replace /></AdminRoute></ProtectedRoute>} />
           
           <Route path="/painel" element={<ProtectedRoute><AdminRoute><AdminDashboard /></AdminRoute></ProtectedRoute>} />
           <Route path="/painel/usuarios" element={<ProtectedRoute><AdminRoute><AdminUsers /></AdminRoute></ProtectedRoute>} />
@@ -89,6 +110,7 @@ const AppRoutes = () => {
           
           <Route path="*" element={<NotFound />} />
         </Routes>
+        </Suspense>
       </div>
     </>
   );
@@ -105,7 +127,7 @@ const App = () => {
         <BrowserRouter>
           <AuthProvider>
             <NotificationProvider>
-              <AppRoutes />
+              <AppErrorBoundary><AppRoutes /></AppErrorBoundary>
             </NotificationProvider>
           </AuthProvider>
         </BrowserRouter>

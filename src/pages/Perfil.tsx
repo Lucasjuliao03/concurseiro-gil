@@ -11,9 +11,10 @@ import { PerformanceCard } from "@/components/PerformanceCard";
 
 export default function PerfilPage() {
   const { user, isAdmin, logout } = useAuth();
+  const courseId = user?.courseId ? String(user.courseId) : null;
 
-  const { data: subjects = [], isLoading: loadingSub } = useSubjects();
-  const { data: questions = [], isLoading: loadingQ } = useQuestions();
+  const { data: subjects = [], isLoading: loadingSub } = useSubjects(isAdmin ? undefined : courseId);
+  const { data: questions = [], isLoading: loadingQ } = useQuestions(isAdmin ? undefined : courseId);
   const { data: profile } = useUserProfile(user?.id);
   const { data: todayProd } = useUserProductivity(user?.id);
   const { data: qStats = [] } = useUserQuestionStats(user?.id);

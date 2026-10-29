@@ -14,7 +14,7 @@ export interface QuestionOption {
 export interface Question {
   id: string;
   subjectId: string;
-  topicId: string | null;
+  topicId?: string | null;
   topic: string;
   subtopic: string;
   difficulty: "fácil" | "média" | "difícil";
@@ -23,14 +23,14 @@ export interface Question {
   organ: string;
   statement: string;
   options: QuestionOption[];
-  correctOption: string;
-  explanation: string;
+  correctOption?: string;
+  explanation?: string;
 }
 
 export interface Flashcard {
   id: string;
   subjectId: string;
-  topicId: string | null;
+  topicId?: string | null;
   topic: string;
   front: string;
   back: string;

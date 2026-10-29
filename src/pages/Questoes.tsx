@@ -6,31 +6,41 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { canAccessContent, isUserActive } from "@/services/accessService";
-import { useSubjects, useQuestions, useRecordAnswer, useUserProductivity, useTopics, useUserQuestionStats } from "@/hooks/useStudyData";
-import { useMemo } from "react";
+import { AnswerResult, useSubjects, useQuestions, useRecordAnswer, useStudyUsage, useTopics, useUserQuestionStats } from "@/hooks/useStudyData";
 import { BlockedOverlay } from "@/components/BlockedOverlay";
+import { StudyEmptyState } from "@/components/StudyEmptyState";
 
 function QuestionCard({ question, subjectName, subjectIcon, onNext, onAnswer }: {
   question: Question;
   subjectName?: string;
   subjectIcon?: string;
   onNext: () => void;
-  onAnswer: (isCorrect: boolean, selectedOption: string) => void;
+  onAnswer: (selectedOption: string) => Promise<AnswerResult>;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const isCorrect = selected === question.correctOption;
+  const [answer, setAnswer] = useState<AnswerResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const isCorrect = answer?.isCorrect ?? false;
 
-  const handleConfirm = () => {
-    if (selected) {
+  const handleConfirm = async () => {
+    if (!selected || submitting) return;
+    setSubmitting(true);
+    try {
+      const result = await onAnswer(selected);
+      setAnswer(result);
       setConfirmed(true);
-      onAnswer(selected === question.correctOption, selected);
+    } catch {
+      setAnswer(null);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleNext = () => {
     setSelected(null);
     setConfirmed(false);
+    setAnswer(null);
     onNext();
   };
 
@@ -62,7 +72,7 @@ function QuestionCard({ question, subjectName, subjectIcon, onNext, onAnswer }: 
         {question.options.map((opt) => {
           const letter = opt.id.toUpperCase();
           const isSelected = selected === opt.id;
-          const isRight = opt.id === question.correctOption;
+          const isRight = opt.id === answer?.correctOption;
           let optStyle = "bg-card border-border hover:border-primary/40";
           if (confirmed) {
             if (isRight) optStyle = "bg-success/10 border-success/40";
@@ -90,11 +100,11 @@ function QuestionCard({ question, subjectName, subjectIcon, onNext, onAnswer }: 
       </div>
 
       {!confirmed ? (
-        <button onClick={handleConfirm} disabled={!selected}
+        <button onClick={handleConfirm} disabled={!selected || submitting}
           className={cn("w-full rounded-xl py-3.5 font-semibold text-sm transition-all",
-            selected ? "bg-primary text-primary-foreground active:scale-[0.98]" : "bg-muted text-muted-foreground cursor-not-allowed"
+            selected && !submitting ? "bg-primary text-primary-foreground active:scale-[0.98]" : "bg-muted text-muted-foreground cursor-not-allowed"
           )}>
-          Confirmar Resposta
+          {submitting ? "Salvando..." : "Confirmar Resposta"}
         </button>
       ) : (
         <div className="space-y-3 animate-slide-up">
@@ -105,7 +115,7 @@ function QuestionCard({ question, subjectName, subjectIcon, onNext, onAnswer }: 
                 {isCorrect ? "Resposta Correta!" : "Resposta Incorreta"}
               </span>
             </div>
-            <p className="text-sm text-foreground/80 leading-relaxed">{question.explanation}</p>
+            <p className="text-sm text-foreground/80 leading-relaxed">{answer?.explanation}</p>
           </div>
           <button onClick={handleNext}
             className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary py-3.5 font-semibold text-sm text-primary-foreground active:scale-[0.98] transition-all">
@@ -121,9 +131,9 @@ export default function QuestoesPage() {
   const { user, isApproved, isAdmin } = useAuth();
   const courseId = user?.courseId ? String(user.courseId) : null;
   const { data: subjects = [], isLoading: loadingSub } = useSubjects(isAdmin ? undefined : courseId);
-  const { data: topics = [], isLoading: loadingTop } = useTopics();
-  const { data: questions = [], isLoading: loadingQ } = useQuestions();
-  const { data: todayProd } = useUserProductivity(user?.id);
+  const { data: topics = [], isLoading: loadingTop } = useTopics(isAdmin ? undefined : courseId);
+  const { data: questions = [], isLoading: loadingQ } = useQuestions(isAdmin ? undefined : courseId);
+  const { data: usage, isLoading: loadingUsage } = useStudyUsage(user?.id);
   const { data: qStats = [], isLoading: loadingStats } = useUserQuestionStats(user?.id);
   const recordAnswer = useRecordAnswer();
 
@@ -152,9 +162,10 @@ export default function QuestoesPage() {
     setCurrentIndex(0);
     setIsFinished(false);
 
-    const topicQuestions = sourceFilteredQuestions.filter(q => 
-      topicId === "general" ? q.subjectId === selectedSubjectId : 
-      q.topicId === topicId || q.subjectId === selectedSubjectId && !q.topicId
+    const topicQuestions = sourceFilteredQuestions.filter((question) =>
+      topicId === "general"
+        ? question.subjectId === selectedSubjectId
+        : question.subjectId === selectedSubjectId && question.topicId === topicId
     );
 
     const sorted = [...topicQuestions].sort((a, b) => {
@@ -183,21 +194,14 @@ export default function QuestoesPage() {
     setSessionQueue(sorted);
   };
 
-  const answeredCount = todayProd?.questions_answered ?? 0;
-  const flashcardsCount = todayProd?.flashcards_reviewed ?? 0;
-  const totalUsage = answeredCount + flashcardsCount;
+  const totalUsage = usage?.content ?? 0;
   const active = isUserActive(user);
   const limitReached = !canAccessContent(user, totalUsage);
 
-  const handleAnswer = (isCorrect: boolean, selectedOption: string) => {
-    if (user && sessionQueue[currentIndex]) {
-      recordAnswer.mutate({
-        userId: user.id,
-        questionId: parseInt(sessionQueue[currentIndex].id),
-        selectedOption,
-        isCorrect,
-      });
-    }
+  const handleAnswer = (selectedOption: string) => {
+    const currentQuestion = sessionQueue[currentIndex];
+    if (!currentQuestion) return Promise.reject(new Error("QUESTION_NOT_AVAILABLE"));
+    return recordAnswer.mutateAsync({ questionId: Number(currentQuestion.id), selectedOption });
   };
 
   const handleNext = () => {
@@ -227,8 +231,16 @@ export default function QuestoesPage() {
     );
   }
 
-  if (loadingQ || loadingSub || loadingTop || loadingStats) {
+  if (loadingQ || loadingSub || loadingTop || loadingStats || loadingUsage) {
     return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando questões...</div></AppLayout>;
+  }
+
+  if (subjects.length === 0) {
+    return <AppLayout><StudyEmptyState title="Nenhuma matéria vinculada" description="O curso precisa ter um edital ativo com matérias vinculadas. Peça à equipe para revisar a estrutura do curso." /></AppLayout>;
+  }
+
+  if (questions.length === 0) {
+    return <AppLayout><StudyEmptyState title="Nenhuma questão publicada" description="As matérias estão vinculadas, mas ainda não há questões publicadas para o edital deste curso." /></AppLayout>;
   }
 
   // --- SELECTION SCREENS ---
@@ -304,7 +316,9 @@ export default function QuestoesPage() {
           </div>
           <div className="space-y-3">
             {filteredTopics.map(topic => {
-              const count = sourceFilteredQuestions.filter(q => q.topicId === String(topic.id) || q.subjectId === selectedSubjectId && !q.topicId).length;
+              const count = sourceFilteredQuestions.filter((question) =>
+                question.subjectId === selectedSubjectId && question.topicId === String(topic.id)
+              ).length;
               return (
                 <button key={topic.id} onClick={() => startSession(String(topic.id))} disabled={count === 0}
                   className="w-full p-4 rounded-xl bg-card border border-border text-left flex justify-between items-center hover:border-primary/50 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">

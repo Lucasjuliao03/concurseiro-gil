@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { useAuth } from "@/contexts/AuthContext";
-import { useGroupedAchievements, useAchievementStats, useUserAchievements } from "@/hooks/useAchievements";
-import { useUserProfile, useUserQuestionStats, useUserProductivity, useUserFlashcardReviews } from "@/hooks/useStudyData";
+import { useGroupedAchievements, useAchievementStats } from "@/hooks/useAchievements";
+import { useUserProfile, useUserQuestionStats, useUserFlashcardReviews, useStudyUsage } from "@/hooks/useStudyData";
 import { ACHIEVEMENTS, AchievementCategory, getRarityColor, getRarityBgColor, getRarityLabel } from "@/types/achievements";
 import { Trophy, ChevronLeft, Lock, Check, Flame, BookOpen, Zap, Layers, Target, Star, Sparkles, Award } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
@@ -140,13 +140,13 @@ export default function AchievementsPage() {
   const { user } = useAuth();
   const { data: profile } = useUserProfile(user?.id);
   const { data: qStats = [] } = useUserQuestionStats(user?.id);
-  const { data: todayProd } = useUserProductivity(user?.id);
   const { data: userFlashcards = [] } = useUserFlashcardReviews(user?.id);
+  const { data: usage } = useStudyUsage(user?.id);
 
   const totalQuestionsAnswered = qStats.reduce((sum, s) => sum + (s.total_attempts || 0), 0);
   const totalQuestionsCorrect = qStats.reduce((sum, s) => sum + (s.total_correct || 0), 0);
   const totalFlashcardsReviewed = userFlashcards.reduce((sum, s) => sum + (s.total_reviews || 0), 0);
-  const summariesRead = parseInt(localStorage.getItem(`summary_count_${user?.id}`) || "0");
+  const summariesRead = usage?.summaries ?? 0;
 
   const stats = {
     questionsAnswered: totalQuestionsAnswered,

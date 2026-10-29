@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { buildStats, getSubjectPerformance, ranks } from "@/services/statsService";
 import { isUserActive, canAccessContent, getRemainingUsage } from "@/services/accessService";
-import { useSubjects, useQuestions, useUserProfile, useUserProductivity, useUserQuestionStats, useCourses } from "@/hooks/useStudyData";
+import { useSubjects, useQuestions, useUserProfile, useUserProductivity, useUserQuestionStats, useCourses, useStudyUsage } from "@/hooks/useStudyData";
 
 export default function HomePage() {
   const { user, isApproved, isAdmin } = useAuth();
@@ -14,23 +14,22 @@ export default function HomePage() {
 
   const { data: courses = [], isLoading: isLoadingCourses } = useCourses();
   const { data: subjects = [], isLoading: isLoadingSub } = useSubjects(isAdmin ? undefined : courseId);
-  const { data: questions = [], isLoading: isLoadingQ } = useQuestions();
+  const { data: questions = [], isLoading: isLoadingQ } = useQuestions(isAdmin ? undefined : courseId);
   const { data: profile } = useUserProfile(user?.id);
   const { data: todayProd } = useUserProductivity(user?.id);
   const { data: qStats = [] } = useUserQuestionStats(user?.id);
+  const { data: usage, isLoading: isLoadingUsage } = useStudyUsage(user?.id);
 
   const course = courses.find((c) => c.id === courseId);
 
   const stats = buildStats(profile, todayProd);
   const performance = !isLoadingQ && !isLoadingSub ? getSubjectPerformance(qStats, questions, subjects) : [];
-  const answeredCount = todayProd?.questions_answered ?? 0;
-  const flashcardsCount = todayProd?.flashcards_reviewed ?? 0;
-  const totalUsage = answeredCount + flashcardsCount;
+  const totalUsage = usage?.content ?? 0;
   const active = isUserActive(user);
   const hasAccess = active && canAccessContent(user, totalUsage);
   const remaining = getRemainingUsage(user, totalUsage);
 
-  if (isLoadingSub || isLoadingQ || isLoadingCourses) {
+  if (isLoadingSub || isLoadingQ || isLoadingCourses || isLoadingUsage) {
     return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando...</div></AppLayout>;
   }
 
@@ -71,7 +70,7 @@ export default function HomePage() {
 
         {!isApproved && hasAccess && remaining !== Infinity && (
           <div className="rounded-2xl bg-warning/10 border border-warning/30 p-3 text-center">
-            <p className="text-xs text-warning font-medium">⚡ Restam <span className="font-bold">{remaining}</span> questões gratuitas</p>
+            <p className="text-xs text-warning font-medium">⚡ Restam <span className="font-bold">{remaining}</span> atividades gratuitas</p>
           </div>
         )}
 

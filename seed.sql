@@ -437,16 +437,21 @@ INSERT INTO public.summaries (edict_id, subject_id, topic_id, title, format, con
 -- =========================================================
 INSERT INTO public.levels (level_number, title, min_xp) VALUES
   (1, 'Recruta', 0),
-  (2, 'Soldado', 200),
-  (3, 'Cabo', 500),
-  (4, 'Sargento', 1000),
-  (5, 'Subtenente', 2000),
-  (6, 'Tenente', 3500),
-  (7, 'Capitão', 5500),
-  (8, 'Major', 8000),
-  (9, 'Coronel', 12000),
-  (10, 'Delegado', 18000)
-ON CONFLICT DO NOTHING;
+  (2, 'Soldado', 150),
+  (3, 'Cabo', 350),
+  (4, '3º Sargento', 600),
+  (5, '2º Sargento', 900),
+  (6, '1º Sargento', 1300),
+  (7, 'Subtenente', 1800),
+  (8, 'Aspirante a Oficial', 2400),
+  (9, '2º Tenente', 3200),
+  (10, '1º Tenente', 4500),
+  (11, 'Capitão', 6500),
+  (12, 'Major', 9000),
+  (13, 'Tenente-Coronel', 13000),
+  (14, 'Coronel', 18000),
+  (15, 'Comandante-Geral', 25000)
+ON CONFLICT (level_number) DO UPDATE SET title = excluded.title, min_xp = excluded.min_xp;
 
 -- =========================================================
 -- 11. CONQUISTAS
@@ -461,6 +466,13 @@ INSERT INTO public.achievements (code, title, description, achievement_type, xp_
   ('fifty_flashcards', '50 Flashcards', 'Revisou 50 flashcards', 'flashcards', 50, true),
   ('all_summaries', 'Leitor Completo', 'Leu todos os resumos de uma matéria', 'summaries', 75, true)
 ON CONFLICT DO NOTHING;
+
+-- Keep identity sequences ahead of explicit seed IDs.
+select setval(pg_get_serial_sequence('public.courses','id'), coalesce((select max(id) from public.courses), 1), true);
+select setval(pg_get_serial_sequence('public.edicts','id'), coalesce((select max(id) from public.edicts), 1), true);
+select setval(pg_get_serial_sequence('public.subjects','id'), coalesce((select max(id) from public.subjects), 1), true);
+select setval(pg_get_serial_sequence('public.topics','id'), coalesce((select max(id) from public.topics), 1), true);
+select setval(pg_get_serial_sequence('public.exam_boards','id'), coalesce((select max(id) from public.exam_boards), 1), true);
 
 -- =========================================================
 -- 12. MENSAGENS MOTIVACIONAIS

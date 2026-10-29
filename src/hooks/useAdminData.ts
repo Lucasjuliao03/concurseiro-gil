@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { User, UserRole } from "@/types/study";
+import { localDateKey } from "@/lib/dates";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------
 // USERS MODULE
@@ -25,6 +27,8 @@ export function useAdminUsers() {
         isApproved: d.is_active,
         createdAt: d.created_at,
         passwordHash: "", // Not used
+        courseId: d.course_id,
+        activeUntil: d.active_until,
       }));
     },
   });
@@ -33,8 +37,8 @@ export function useAdminUsers() {
 export function useApproveUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (userId: string) => {
-      const { error } = await supabase.from("profiles").update({ is_active: true }).eq("id", userId);
+    mutationFn: async ({ userId, activeUntil }: { userId: string; activeUntil?: string | null }) => {
+      const { error } = await supabase.from("profiles").update({ is_active: true, active_until: activeUntil }).eq("id", userId);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -56,6 +60,21 @@ export function useBlockUser() {
   });
 }
 
+export function useUpdateUserCourse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, courseId }: { userId: string; courseId: number | null }) => {
+      const { error } = await supabase.from("profiles").update({ course_id: courseId }).eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Curso do usuário atualizado.");
+      void qc.invalidateQueries({ queryKey: ["admin_users"] });
+    },
+    onError: (error: Error) => toast.error("Não foi possível atualizar o curso.", { description: error.message }),
+  });
+}
+
 // ---------------------------------------------------------
 // OTHER MODULES AHEAD...
 // ---------------------------------------------------------
@@ -74,7 +93,7 @@ export function useAdminDashboardStats() {
         supabase.from("flashcards").select("*", { count: "exact", head: true }),
       ]);
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = localDateKey();
       const { data: prodData } = await supabase
         .from("user_daily_productivity")
         .select("questions_answered")
@@ -578,7 +597,11 @@ export function useAddEdictSubject() {
       });
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_edict_subjects"] }),
+    onSuccess: () => {
+      toast.success("Matéria vinculada ao edital.");
+      void qc.invalidateQueries({ queryKey: ["admin_edict_subjects"] });
+    },
+    onError: (error: Error) => toast.error("Não foi possível vincular a matéria.", { description: error.message }),
   });
 }
 
@@ -593,6 +616,10 @@ export function useRemoveEdictSubject() {
         .eq("subject_id", vars.subjectId);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin_edict_subjects"] }),
+    onSuccess: () => {
+      toast.success("Vínculo da matéria removido.");
+      void qc.invalidateQueries({ queryKey: ["admin_edict_subjects"] });
+    },
+    onError: (error: Error) => toast.error("Não foi possível remover o vínculo.", { description: error.message }),
   });
 }

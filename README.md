@@ -1,74 +1,118 @@
-# Welcome to your Lovable project
+# SAFO — Plataforma de estudos para concursos
 
-## Project info
+Aplicação web mobile-first para estudo por questões, flashcards e resumos, com cursos/editais, progresso, XP, patentes, sequência diária, conquistas e painel administrativo.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Stack
 
-## How can I edit this code?
+- React 18, TypeScript e Vite
+- Tailwind CSS e shadcn/ui
+- Supabase Auth, PostgreSQL, RPC e Row Level Security
+- TanStack Query
+- Vitest e Testing Library
+- PWA com service worker
 
-There are several ways of editing your application.
+## Requisitos
 
-**Use Lovable**
+- Node.js 22 LTS ou superior
+- npm 10 ou superior
+- Um projeto Supabase
+- Supabase CLI para aplicar as migrações
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Configuração local
 
-Changes made via Lovable will be committed automatically to this repo.
+```bash
+npm ci
+cp .env.example .env
+```
 
-**Use your preferred IDE**
+Preencha `.env` com a URL e a chave publicável do projeto Supabase. Nunca coloque `service_role` em variáveis `VITE_*`: todo valor `VITE_*` é incorporado ao JavaScript entregue ao navegador.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+```env
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_ANON_KEY=sua-chave-publicavel
+```
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Depois, vincule o projeto e aplique as migrações na ordem versionada:
 
-Follow these steps:
+```bash
+supabase login
+supabase link --project-ref SEU_PROJECT_REF
+supabase db push
+```
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+O arquivo `seed.sql` contém conteúdo inicial opcional. Aplique-o somente depois das migrações e apenas em um ambiente que possa receber esses dados.
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed.sql
+```
 
-# Step 3: Install the necessary dependencies.
-npm i
+Inicie o frontend:
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## Validação obrigatória
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm audit --omit=dev
+```
 
-**Use GitHub Codespaces**
+O build não substitui o typecheck. O pipeline de produção deve executar todos os comandos acima.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Segurança e integridade
 
-## What technologies are used for this project?
+- O cliente nunca recebe o gabarito antes da resposta.
+- Correção, XP, streak, produtividade e conquistas são calculados em RPCs transacionais.
+- O limite gratuito é vitalício e também é validado no banco.
+- Perfis e histórico de estudo possuem RLS por usuário; administradores são validados no banco.
+- HTML de resumos é sanitizado antes da renderização.
+- A chave `service_role` nunca é necessária no frontend.
 
-This project is built with:
+Não reintroduza escrita direta nas tabelas de progresso. Os fluxos de estudo devem usar `record_question_answer`, `record_flashcard_review` e `record_summary_view`.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Promoção para produção
 
-## How can I deploy this project?
+1. Faça backup do banco.
+2. Aplique as migrações primeiro.
+3. Valide cadastro, confirmação de e-mail e login em staging.
+4. Teste aluno pendente, aluno aprovado, acesso expirado e administrador.
+5. Teste o limite de 10 atividades e 2 resumos.
+6. Só então publique o frontend correspondente.
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+A migração `202608300001_production_hardening.sql` remove a antiga função arbitrária de XP e substitui políticas permissivas. O frontend novo depende dessas RPCs; não publique apenas um dos lados.
 
-## Can I connect a custom domain to my Lovable project?
+## Diagnóstico de curso sem material
 
-Yes, you can!
+O acesso ao material segue esta cadeia: `perfil do usuário → curso → edital ativo → matéria vinculada → conteúdo publicado`. No painel:
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+1. Confirme o curso do aluno em **Usuários → Curso**.
+2. Confirme que o curso possui pelo menos um edital ativo.
+3. Em **Estrutura → Vincular**, associe as matérias ao edital.
+4. Confirme que questões, flashcards e resumos estão publicados e vinculados ao mesmo edital.
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
-"# safo_app" 
+Se a API retornar `PGRST202` para `get_study_questions`, `get_my_usage` ou `record_*`, o frontend e o banco estão em versões diferentes. Aplique `supabase db push` antes de testar novamente. As consultas do aluno são armazenadas em cache por curso e o cache é apagado ao trocar de conta.
+
+## Estrutura principal
+
+```text
+src/
+  components/       layouts e componentes visuais
+  contexts/         autenticação e notificações
+  hooks/            consultas e mutações Supabase
+  pages/            área do aluno
+  pages/admin/      painel administrativo
+  services/         regras de acesso e estatísticas
+  test/             testes unitários
+supabase/migrations/
+  202608300000_baseline.sql
+  202608300001_production_hardening.sql
+```
+
+## Exclusão de usuários
+
+O frontend bloqueia contas, mas não apaga identidades de `auth.users`. Exclusão definitiva exige uma Edge Function ou backend confiável usando `service_role`, com confirmação e trilha de auditoria. Nunca exponha essa chave no navegador.

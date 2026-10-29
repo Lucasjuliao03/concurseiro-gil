@@ -1,14 +1,25 @@
 import { useState } from "react";
 import { AdminLayout } from "@/components/AdminLayout";
-import { useAdminUsers, useApproveUser, useBlockUser } from "@/hooks/useAdminData";
+import { useAdminCourses, useAdminUsers, useApproveUser, useBlockUser, useUpdateUserCourse } from "@/hooks/useAdminData";
 import { Check, X, Search, ShieldCheck, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function AdminUsers() {
   const { data: users = [], isLoading } = useAdminUsers();
+  const { data: courses = [] } = useAdminCourses();
   const approveMutation = useApproveUser();
   const blockMutation = useBlockUser();
+  const updateCourseMutation = useUpdateUserCourse();
   const [search, setSearch] = useState("");
+  const [activeDates, setActiveDates] = useState<Record<string, string>>({});
+
+  const approve = (userId: string, existingDate?: string | null) => {
+    const selected = activeDates[userId] ?? existingDate?.slice(0, 10) ?? "";
+    approveMutation.mutate({
+      userId,
+      activeUntil: selected ? new Date(`${selected}T23:59:59`).toISOString() : null,
+    });
+  };
 
   const filteredUsers = users.filter(u => 
     u.name?.toLowerCase().includes(search.toLowerCase()) || 
@@ -43,6 +54,7 @@ export default function AdminUsers() {
                   <th className="px-6 py-3 font-semibold">Usuário</th>
                   <th className="px-6 py-3 font-semibold">Cadastro</th>
                   <th className="px-6 py-3 font-semibold">Papel</th>
+                  <th className="px-6 py-3 font-semibold">Curso</th>
                   <th className="px-6 py-3 font-semibold">Status</th>
                   <th className="px-6 py-3 font-semibold text-right">Ações</th>
                 </tr>
@@ -50,13 +62,13 @@ export default function AdminUsers() {
               <tbody className="divide-y divide-border">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
                       Carregando usuários...
                     </td>
                   </tr>
                 ) : filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
                       Nenhum usuário encontrado.
                     </td>
                   </tr>
@@ -80,6 +92,27 @@ export default function AdminUsers() {
                         </span>
                       </td>
                       <td className="px-6 py-3">
+                        {user.role === "admin" ? (
+                          <span className="text-xs text-muted-foreground">Todos</span>
+                        ) : (
+                          <select
+                            aria-label={`Curso de ${user.name}`}
+                            value={user.courseId ?? ""}
+                            disabled={updateCourseMutation.isPending}
+                            onChange={(event) => updateCourseMutation.mutate({
+                              userId: user.id,
+                              courseId: event.target.value ? Number(event.target.value) : null,
+                            })}
+                            className="min-w-32 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Sem curso</option>
+                            {courses.map((course) => (
+                              <option key={course.id} value={course.id}>{course.name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </td>
+                      <td className="px-6 py-3">
                         <span className={cn(
                           "font-semibold text-[10px] px-2 py-0.5 rounded-full border",
                           user.isApproved
@@ -94,7 +127,7 @@ export default function AdminUsers() {
                           <>
                             {!user.isApproved ? (
                               <button
-                                onClick={() => approveMutation.mutate(user.id)}
+                                onClick={() => approve(user.id, user.activeUntil)}
                                 disabled={approveMutation.isPending}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-success/10 text-success hover:bg-success hover:text-success-foreground transition-all disabled:opacity-50"
                               >
@@ -110,6 +143,16 @@ export default function AdminUsers() {
                               </button>
                             )}
                           </>
+                        )}
+                        {user.role !== "admin" && (
+                          <input
+                            type="date"
+                            aria-label={`Validade do acesso de ${user.name}`}
+                            value={activeDates[user.id] ?? user.activeUntil?.slice(0, 10) ?? ""}
+                            onChange={(event) => setActiveDates((current) => ({ ...current, [user.id]: event.target.value }))}
+                            onBlur={() => user.isApproved && approve(user.id, user.activeUntil)}
+                            className="mt-2 rounded-md border border-border bg-background px-2 py-1 text-xs"
+                          />
                         )}
                       </td>
                     </tr>

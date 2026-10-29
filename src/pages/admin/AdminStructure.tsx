@@ -140,11 +140,14 @@ function VincularManager() {
               {allSubjects.map((sub: any) => {
                 const isLinked = linkedSubjectIds.includes(sub.id);
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={sub.id}
                     onClick={() => handleToggleSubject(sub.id)}
+                    disabled={addEdictSubject.isPending || removeEdictSubject.isPending}
+                    aria-pressed={isLinked}
                     className={cn(
-                      "flex items-center justify-between rounded-lg border p-3 transition-all cursor-pointer hover:scale-[1.01]",
+                      "flex w-full items-center justify-between rounded-lg border p-3 text-left transition-all hover:scale-[1.01] disabled:cursor-wait disabled:opacity-60",
                       isLinked ? "bg-success/10 border-success/30" : "bg-card border-border hover:border-muted-foreground/30"
                     )}
                   >
@@ -158,7 +161,7 @@ function VincularManager() {
                     )}>
                       {isLinked ? <Minus className="h-3.5 w-3.5 text-success" /> : <Plus className="h-3.5 w-3.5 text-muted-foreground" />}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>

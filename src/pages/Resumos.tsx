@@ -4,37 +4,35 @@ import { FileText, ChevronLeft, BookOpen, CheckCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSubjects, useSummaries, SUBJECT_UI_MAP } from "@/hooks/useStudyData";
-import { canAccessSummaries, isUserActive } from "@/services/accessService";
+import { useSubjects, useSummaries, SUBJECT_UI_MAP, useRecordSummaryView, useStudyUsage } from "@/hooks/useStudyData";
+import { isUserActive } from "@/services/accessService";
 import { BlockedOverlay } from "@/components/BlockedOverlay";
+import { sanitizeSummaryHtml } from "@/lib/sanitizeHtml";
+import { StudyEmptyState } from "@/components/StudyEmptyState";
 
 export default function ResumosPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const courseId = user?.courseId ? String(user.courseId) : null;
   const { data: subjects = [], isLoading: loadingSub } = useSubjects(isAdmin ? undefined : courseId);
-  const { data: summaries = [], isLoading: loadingSum } = useSummaries();
+  const { data: summaries = [], isLoading: loadingSum } = useSummaries(isAdmin ? undefined : courseId);
+  const { data: usage, isLoading: loadingUsage } = useStudyUsage(user?.id);
+  const recordView = useRecordSummaryView();
 
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [selectedSummaryId, setSelectedSummaryId] = useState<string | null>(null);
 
-  if (loadingSub || loadingSum) {
+  if (loadingSub || loadingSum || loadingUsage) {
     return <AppLayout><div className="p-8 text-center text-muted-foreground">Carregando resumos...</div></AppLayout>;
   }
 
   const active = isUserActive(user);
   
-  const viewedStr = localStorage.getItem(`viewed_summaries_${user?.id}`) || "[]";
-  const viewedSummaries: string[] = JSON.parse(viewedStr);
-  const readCount = viewedSummaries.length;
-  const summaryLimitReached = !canAccessSummaries(user, readCount);
+  const readCount = usage?.summaries ?? 0;
+  const viewedSummaries = usage?.summaryIds ?? [];
 
   if (!active) {
     return <AppLayout><BlockedOverlay reason="expired" /></AppLayout>;
-  }
-
-  if (summaryLimitReached && !user?.isApproved && !selectedSummaryId) {
-    return <AppLayout><BlockedOverlay readCount={readCount} reason="limit_reached" /></AppLayout>;
   }
 
   if (!isAdmin && !courseId) {
@@ -48,19 +46,23 @@ export default function ResumosPage() {
     );
   }
 
-  const handleSelectSummary = (id: string) => {
-    if (!user?.isApproved && !viewedSummaries.includes(id)) {
-      if (readCount >= 2) return; // Prevent opening if limit reached, though UI covers it
-      viewedSummaries.push(id);
-      localStorage.setItem(`viewed_summaries_${user?.id}`, JSON.stringify(viewedSummaries));
+  const handleSelectSummary = async (id: string) => {
+    try {
+      await recordView.mutateAsync(Number(id));
+      setSelectedSummaryId(id);
+    } catch {
+      return;
     }
-    setSelectedSummaryId(id);
   };
 
   // Group summaries by subject
   const subjectsWithSummaries = subjects.filter(s =>
     summaries.some(sum => sum.subjectId === s.id)
   );
+
+  if (subjectsWithSummaries.length === 0) {
+    return <AppLayout><StudyEmptyState title="Nenhum resumo publicado" description="Não há resumos publicados nas matérias vinculadas ao edital deste curso." /></AppLayout>;
+  }
 
   // View a specific summary
   if (selectedSummaryId) {
@@ -87,7 +89,7 @@ export default function ResumosPage() {
           <div className="rounded-2xl bg-card border border-border p-5">
             {summary.contentHtml ? (
               <div className="prose prose-sm prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: summary.contentHtml }} />
+                dangerouslySetInnerHTML={{ __html: sanitizeSummaryHtml(summary.contentHtml) }} />
             ) : summary.contentMarkdown ? (
               <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
                 {summary.contentMarkdown}
@@ -120,9 +122,11 @@ export default function ResumosPage() {
           </div>
 
           <div className="space-y-2">
-            {subjectSummaries.map(summary => (
-              <button key={summary.id} onClick={() => handleSelectSummary(summary.id)}
-                className="w-full flex items-center gap-3 rounded-xl bg-card border border-border p-4 text-left transition-all hover:border-primary/40 active:scale-[0.98]">
+            {subjectSummaries.map(summary => {
+              const canOpen = Boolean(user?.isApproved || isAdmin || viewedSummaries.includes(summary.id) || readCount < 2);
+              return (
+              <button key={summary.id} disabled={!canOpen || recordView.isPending} onClick={() => void handleSelectSummary(summary.id)}
+                className="w-full flex items-center gap-3 rounded-xl bg-card border border-border p-4 text-left transition-all hover:border-primary/40 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
                 <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10 border border-primary/20">
                   <BookOpen className="h-5 w-5 text-primary" />
                 </div>
@@ -133,7 +137,7 @@ export default function ResumosPage() {
                   </p>
                 </div>
               </button>
-            ))}
+            );})}
           </div>
         </div>
       </AppLayout>

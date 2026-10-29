@@ -59,28 +59,30 @@ export function useNotifications() {
     }
   }, [isSupported, settings, saveSettings]);
 
-  const sendNotification = useCallback((payload: NotificationPayload) => {
+  const sendNotification = useCallback(async (payload: NotificationPayload) => {
     if (!isSupported || permission !== 'granted' || !settings.enabled) {
       return;
     }
 
     try {
-      const notification = new Notification(payload.title, {
+      const options: NotificationOptions = {
         body: payload.body,
-        icon: payload.icon || '/icon-192.png',
+        icon: payload.icon || '/icons/icon-192x192.png',
+        badge: '/icons/icon-96x96.png',
         tag: payload.tag || 'safo-notification',
-        requireInteraction: false,
-      });
-
+        data: payload.data,
+      };
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.ready;
+        await registration.showNotification(payload.title, options);
+        return;
+      }
+      const notification = new Notification(payload.title, options);
       notification.onclick = () => {
         window.focus();
         notification.close();
-        if (payload.data?.url) {
-          window.location.href = payload.data.url;
-        }
+        if (payload.data?.url) window.location.assign(String(payload.data.url));
       };
-
-      setTimeout(() => notification.close(), 10000);
     } catch (e) {
       console.error('Erro ao enviar notificação:', e);
     }
@@ -152,12 +154,12 @@ export function useNotifications() {
     
     const { data: prodData } = await supabase
       .from('user_daily_productivity')
-      .select('questions_answered')
+      .select('questions_answered,flashcards_reviewed')
       .eq('user_id', userId)
       .eq('productivity_date', todayStr)
       .single();
 
-    const hasStudiedToday = prodData && prodData.questions_answered > 0;
+    const hasStudiedToday = Boolean(prodData && (prodData.questions_answered > 0 || prodData.flashcards_reviewed > 0));
 
     if (hasStudiedToday) {
       markAsStudied();
@@ -224,12 +226,9 @@ function clearScheduledNotifications() {
   }
 }
 
-export function initNotificationListeners(notifications: ReturnType<typeof useNotifications>) {
-  if (typeof window === 'undefined') return;
-
-  window.removeEventListener('safo:daily-reminder', () => {});
-  
-  window.addEventListener('safo:daily-reminder', () => {
-    notifications.sendDailyReminder();
-  });
+export function initNotificationListeners(sendDailyReminder: () => void) {
+  if (typeof window === 'undefined') return () => undefined;
+  const handler = () => sendDailyReminder();
+  window.addEventListener('safo:daily-reminder', handler);
+  return () => window.removeEventListener('safo:daily-reminder', handler);
 }
